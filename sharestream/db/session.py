@@ -12,7 +12,24 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from sharestream.config import DATABASE_URL
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+# Pool sizing matters because routes that proxy media return a StreamingResponse,
+# and a request's DB connection isn't released until that response *finishes* —
+# i.e. for the whole duration of a video download. Even though we now release the
+# session before streaming begins (the media routes use short SessionLocal()
+# blocks), a generous, fast-failing pool is the safety net: pool_timeout=10 fails
+# a starved request quickly instead of stalling 30s behind Cloudflare's edge
+# timeout (which surfaces as a 524). SQLite in WAL mode handles many concurrent
+# connections fine, so a larger pool is safe here. pool_pre_ping drops dead
+# connections; pool_recycle keeps them fresh.
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    pool_size=20,
+    max_overflow=40,
+    pool_timeout=10,
+    pool_recycle=1800,
+    pool_pre_ping=True,
+)
 
 
 # We write (hit counters) on ordinary page views, so the default rollback-journal

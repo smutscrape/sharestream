@@ -11,12 +11,11 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
-from sqlalchemy.orm import Session
 
 from sharestream.config import SHARES_DIR
-from sharestream.db.session import get_db
+from sharestream.db.session import SessionLocal
 from sharestream.services import access, media_proxy
 from sharestream.services.resolver import resolve_media
 from sharestream.services.thumbnails import (
@@ -28,6 +27,17 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
+# These routes deliberately do NOT take a ``db: Session = Depends(get_db)``.
+# A request-scoped dependency session is held open until the response *finishes*,
+# and these routes return StreamingResponses (or proxy media), so a Depends(get_db)
+# connection would stay checked out for the entire video download — quickly
+# starving the pool under concurrent playback. Instead each route opens a short
+# ``with SessionLocal() as db:`` block for the brief DB lookup + access check,
+# extracts the plain values it needs, and lets the session close BEFORE streaming
+# begins. ResolvedMedia is a detached dataclass, so its fields stay valid after
+# the session closes.
+
 _M3U8_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Cache-Control": "public, max-age=10",
@@ -38,12 +48,12 @@ _M3U8_HEADERS = {
 # Cached screenshot routes (served through the access gate)
 # ------------------------------------------------------------------
 @router.get("/tag/{share_id}/thumbnail/{video_id}")
-async def get_tag_video_thumbnail(share_id: str, video_id: int, request: Request = None,
-                                  db: Session = Depends(get_db)):
+async def get_tag_video_thumbnail(share_id: str, video_id: int, request: Request = None):
     # Enforce expiry / password / tag membership before serving the cached
     # screenshot straight from the private cache (NOT a redirect to a public
     # /static URL, which would sidestep this gate).
-    await access.authorize_tag_video(request, db, share_id, video_id)
+    with SessionLocal() as db:
+        await access.authorize_tag_video(request, db, share_id, video_id)
     thumbnail_path = await fetch_and_cache_tag_video_thumbnail(share_id, video_id)
     if thumbnail_path:
         return FileResponse(thumbnail_path, media_type="image/jpeg",
@@ -54,13 +64,14 @@ async def get_tag_video_thumbnail(share_id: str, video_id: int, request: Request
 
 
 @router.get("/share/{share_id}/thumbnail.jpg")
-async def serve_share_thumbnail(share_id: str, request: Request = None,
-                                db: Session = Depends(get_db)):
+async def serve_share_thumbnail(share_id: str, request: Request = None):
     # Cached screenshot for an individual share, served through the access gate so
     # a password-protected share's thumbnail can't be fetched by guessing a
     # static URL.
-    video = access.authorize_share_media(request, db, share_id, "Share has expired")
-    thumbnail_path = await fetch_and_cache_thumbnail(share_id, video.stash_video_id)
+    with SessionLocal() as db:
+        video = access.authorize_share_media(request, db, share_id, "Share has expired")
+        stash_video_id = video.stash_video_id
+    thumbnail_path = await fetch_and_cache_thumbnail(share_id, stash_video_id)
     if thumbnail_path:
         return FileResponse(thumbnail_path, media_type="image/jpeg",
                             headers={"Cache-Control": "private, max-age=300"})
@@ -71,10 +82,11 @@ async def serve_share_thumbnail(share_id: str, request: Request = None,
 # HLS playlists + segments
 # ------------------------------------------------------------------
 @router.get("/share/{share_id}/stream.m3u8")
-async def serve_m3u8_file(share_id: str, request: Request = None, db: Session = Depends(get_db)):
+async def serve_m3u8_file(share_id: str, request: Request = None):
     # Accepts an individual share id or the composite tag-video id.
     try:
-        resolved = resolve_media(db, share_id)
+        with SessionLocal() as db:
+            resolved = resolve_media(db, share_id)
         if not resolved:
             raise HTTPException(status_code=404, detail="Share link not found")
         await access.authorize_media(request, resolved)
@@ -95,10 +107,10 @@ async def serve_m3u8_file(share_id: str, request: Request = None, db: Session = 
 
 
 @router.get("/share/{share_id}/stream/{segment}", response_class=StreamingResponse)
-async def proxy_hls_segment(share_id: str, segment: str, request: Request = None,
-                            db: Session = Depends(get_db)):
+async def proxy_hls_segment(share_id: str, segment: str, request: Request = None):
     try:
-        resolved = resolve_media(db, share_id)
+        with SessionLocal() as db:
+            resolved = resolve_media(db, share_id)
         if not resolved:
             raise HTTPException(status_code=404, detail="Share link not found")
         if request is not None:
@@ -113,16 +125,17 @@ async def proxy_hls_segment(share_id: str, segment: str, request: Request = None
 
 
 @router.get("/tag/{share_id}/video/{video_id}/stream.m3u8")
-async def serve_tag_video_m3u8(share_id: str, video_id: int, request: Request = None,
-                               db: Session = Depends(get_db)):
+async def serve_tag_video_m3u8(share_id: str, video_id: int, request: Request = None):
     try:
-        tag_share = await access.authorize_tag_video(request, db, share_id, video_id)
+        with SessionLocal() as db:
+            tag_share = await access.authorize_tag_video(request, db, share_id, video_id)
+            resolution = tag_share.resolution
 
         composite_id = f"tag-{share_id}-video-{video_id}"
         m3u8_path = SHARES_DIR / f"{composite_id}.m3u8"
         if not m3u8_path.exists():
             logger.warning(f".m3u8 file not found for tag video {share_id}/{video_id}, attempting to generate")
-            if not await media_proxy.generate_m3u8_file(composite_id, video_id, tag_share.resolution):
+            if not await media_proxy.generate_m3u8_file(composite_id, video_id, resolution):
                 logger.error(f"Failed to generate .m3u8 file for tag video {share_id}/{video_id}")
                 raise HTTPException(status_code=500, detail="Failed to generate .m3u8 file")
 
@@ -135,13 +148,14 @@ async def serve_tag_video_m3u8(share_id: str, video_id: int, request: Request = 
 
 
 @router.get("/tag/{share_id}/video/{video_id}/stream/{segment}", response_class=StreamingResponse)
-async def proxy_tag_video_segment(share_id: str, video_id: int, segment: str, request: Request = None,
-                                  db: Session = Depends(get_db)):
+async def proxy_tag_video_segment(share_id: str, video_id: int, segment: str, request: Request = None):
     try:
         if request is not None:
             logger.debug(f"{request.client.host} requested segment {segment} for tag video {share_id}/{video_id}")
-        tag_share = await access.authorize_tag_video(request, db, share_id, video_id)
-        return await media_proxy.stream_segment(video_id, segment, tag_share.resolution)
+        with SessionLocal() as db:
+            tag_share = await access.authorize_tag_video(request, db, share_id, video_id)
+            resolution = tag_share.resolution
+        return await media_proxy.stream_segment(video_id, segment, resolution)
     except HTTPException:
         raise
     except Exception as e:
@@ -153,15 +167,17 @@ async def proxy_tag_video_segment(share_id: str, video_id: int, segment: str, re
 # Legacy preview passthrough routes
 # ------------------------------------------------------------------
 @router.get("/share/{share_id}/preview")
-async def proxy_video_preview(share_id: str, request: Request = None, db: Session = Depends(get_db)):
-    video = access.authorize_share_media(request, db, share_id, "Share has expired")
-    return await media_proxy.stream_simple_preview(video.stash_video_id)
+async def proxy_video_preview(share_id: str, request: Request = None):
+    with SessionLocal() as db:
+        video = access.authorize_share_media(request, db, share_id, "Share has expired")
+        stash_video_id = video.stash_video_id
+    return await media_proxy.stream_simple_preview(stash_video_id)
 
 
 @router.get("/tag/{share_id}/video/{video_id}/preview")
-async def proxy_tag_video_preview(share_id: str, video_id: int, request: Request = None,
-                                  db: Session = Depends(get_db)):
-    await access.authorize_tag_video(request, db, share_id, video_id)
+async def proxy_tag_video_preview(share_id: str, video_id: int, request: Request = None):
+    with SessionLocal() as db:
+        await access.authorize_tag_video(request, db, share_id, video_id)
     return await media_proxy.stream_simple_preview(video_id)
 
 
@@ -169,8 +185,9 @@ async def proxy_tag_video_preview(share_id: str, video_id: int, request: Request
 # Range/HEAD-aware MP4 / WebP / thumbnail proxy routes
 # ------------------------------------------------------------------
 @router.api_route("/share/{share_id}/stream.mp4", methods=["GET", "HEAD"])
-async def serve_mp4_preview(share_id: str, request: Request, db: Session = Depends(get_db)):
-    resolved = resolve_media(db, share_id)
+async def serve_mp4_preview(share_id: str, request: Request):
+    with SessionLocal() as db:
+        resolved = resolve_media(db, share_id)
     if not resolved:
         raise HTTPException(status_code=404, detail="Share link not found")
     await access.authorize_media(request, resolved)
@@ -178,20 +195,21 @@ async def serve_mp4_preview(share_id: str, request: Request, db: Session = Depen
 
 
 @router.api_route("/tag/{share_id}/video/{video_id}/stream.mp4", methods=["GET", "HEAD"])
-async def serve_tag_video_mp4(share_id: str, video_id: int, request: Request,
-                              db: Session = Depends(get_db)):
-    await access.authorize_tag_video(request, db, share_id, video_id)
+async def serve_tag_video_mp4(share_id: str, video_id: int, request: Request):
+    with SessionLocal() as db:
+        await access.authorize_tag_video(request, db, share_id, video_id)
     return await media_proxy.proxy_preview(video_id, request)
 
 
 @router.api_route("/{share_id}/full.mp4", methods=["GET", "HEAD"])
-async def serve_full_mp4(share_id: str, request: Request, db: Session = Depends(get_db)):
+async def serve_full_mp4(share_id: str, request: Request):
     """Full-video og:video, range-proxied from Stash (never stored on disk).
 
     Accepts either an individual share id or the composite tag-video id
     (tag-{tag}-video-{id}); gating mirrors the preview/stream routes.
     """
-    resolved = resolve_media(db, share_id)
+    with SessionLocal() as db:
+        resolved = resolve_media(db, share_id)
     if not resolved:
         raise HTTPException(status_code=404, detail="Share link not found")
     await access.authorize_media(request, resolved)
@@ -199,9 +217,10 @@ async def serve_full_mp4(share_id: str, request: Request, db: Session = Depends(
 
 
 @router.api_route("/share/{share_id}/webp", methods=["GET", "HEAD"])
-async def serve_share_webp(share_id: str, request: Request, db: Session = Depends(get_db)):
+async def serve_share_webp(share_id: str, request: Request):
     """Animated WebP preview for an individual share (or composite tag-video id)."""
-    resolved = resolve_media(db, share_id)
+    with SessionLocal() as db:
+        resolved = resolve_media(db, share_id)
     if not resolved:
         raise HTTPException(status_code=404, detail="Share link not found")
     await access.authorize_media(request, resolved)
@@ -209,10 +228,11 @@ async def serve_share_webp(share_id: str, request: Request, db: Session = Depend
 
 
 @router.api_route("/share/{share_id}/thumb", methods=["GET", "HEAD"])
-async def serve_share_thumb(share_id: str, request: Request, db: Session = Depends(get_db)):
+async def serve_share_thumb(share_id: str, request: Request):
     """Social-embed thumbnail (animated WebP, or static JPEG for Reddit/Embed.ly)
     for an individual share or composite tag-video id."""
-    resolved = resolve_media(db, share_id)
+    with SessionLocal() as db:
+        resolved = resolve_media(db, share_id)
     if not resolved:
         raise HTTPException(status_code=404, detail="Share link not found")
     await access.authorize_media(request, resolved)
@@ -220,16 +240,16 @@ async def serve_share_thumb(share_id: str, request: Request, db: Session = Depen
 
 
 @router.api_route("/tag/{share_id}/video/{video_id}/thumb", methods=["GET", "HEAD"])
-async def serve_tag_video_thumb(share_id: str, video_id: int, request: Request,
-                                db: Session = Depends(get_db)):
+async def serve_tag_video_thumb(share_id: str, video_id: int, request: Request):
     """Social-embed thumbnail for a video within a tag share."""
-    await access.authorize_tag_video(request, db, share_id, video_id)
+    with SessionLocal() as db:
+        await access.authorize_tag_video(request, db, share_id, video_id)
     return await media_proxy.proxy_thumb(video_id, request)
 
 
 @router.api_route("/tag/{share_id}/video/{video_id}/webp", methods=["GET", "HEAD"])
-async def serve_tag_video_webp(share_id: str, video_id: int, request: Request,
-                               db: Session = Depends(get_db)):
+async def serve_tag_video_webp(share_id: str, video_id: int, request: Request):
     """Animated WebP preview for a video within a tag share."""
-    await access.authorize_tag_video(request, db, share_id, video_id)
+    with SessionLocal() as db:
+        await access.authorize_tag_video(request, db, share_id, video_id)
     return await media_proxy.proxy_webp(video_id, request)
