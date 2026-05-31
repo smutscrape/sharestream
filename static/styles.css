@@ -129,6 +129,19 @@ h1, h2, h3 {
     text-align: center;
 }
 
+/* Headings use background-clip:text + transparent fill for the gradient look,
+   which also clips any emoji glyph to the gradient — rendering it as a flat
+   silhouette. emoji-fix.js wraps emoji in <span class="emoji"> so this rule can
+   restore their normal multicolor rendering (the fill/clip reset below). */
+.emoji {
+    -webkit-text-fill-color: initial;
+    -webkit-background-clip: initial;
+    background-clip: initial;
+    background: none;
+    color: initial;
+    text-shadow: none;
+}
+
 h1 {
     font-size: 1.5rem;
 }
