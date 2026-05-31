@@ -1,0 +1,768 @@
+html {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;  /* Only hide overflow at the top level */
+}
+
+body {
+    background: linear-gradient(135deg, #050507 0%, #0a050f 100%);
+    color: #c8b3d4;  /* Muted purple-grey instead of bright white */
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    overflow: hidden;
+}
+
+.container {
+    height: 100vh;
+    width: 100vw;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    margin: 0;
+    max-width: none;
+}
+
+.header {
+    padding: 15px 30px;
+    background: rgba(10, 5, 15, 0.95);
+    border-bottom: 1px solid rgba(180, 0, 90, 0.2);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 2px 20px rgba(180, 0, 90, 0.1);
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.header img {
+    max-height: 80px;
+    filter: drop-shadow(0 0 10px rgba(180, 0, 90, 0.3));
+}
+
+h1 {
+    background: linear-gradient(135deg, #b8006b 0%, #d459a8 50%, #9554cc 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-transform: uppercase;
+    font-size: 1.3rem;
+    font-weight: 800;
+    margin: 0;
+    letter-spacing: 2px;
+    text-shadow: 0 0 30px rgba(180, 0, 90, 0.5);
+}
+
+.header-controls {
+    display: flex;
+    gap: 15px;
+}
+
+/* Make logout button same size as refresh button */
+#logout-button,
+#refresh-shares {
+    padding: 12px 24px;
+    font-size: 0.85rem;
+    height: 44px;  /* Fixed height instead of min-height */
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#admin-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    width: 100%;
+}
+
+.admin-content-wrapper {
+    flex: 1;
+    padding: 10px;
+    overflow: hidden;
+    display: flex;
+    max-width: none;
+}
+
+.admin-2pane {
+    display: flex;
+    flex-direction: row;
+    gap: 20px;
+    height: 100%;
+    width: 100%;
+}
+
+.admin-pane {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.tab-header {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid rgba(149, 84, 204, 0.2);
+    margin-bottom: 10px;
+}
+
+.tab-btn {
+    background: none;
+    border: none;
+    color: #d459a8;
+    font-size: 1rem;
+    font-weight: 700;
+    padding: 12px 24px;
+    cursor: pointer;
+    border-radius: 12px 12px 0 0;
+    margin-right: 2px;
+    transition: background 0.2s, color 0.2s;
+    outline: none;
+    position: relative;
+    z-index: 1;
+}
+
+.tab-btn.active {
+    background: linear-gradient(135deg, #1a0a2f 0%, #2a0a4f 100%);
+    color: #fff;
+    border-bottom: 2px solid #b8006b;
+    box-shadow: 0 2px 10px rgba(184, 0, 107, 0.08);
+}
+
+.tab-btn:not(.active):hover {
+    background: rgba(149, 84, 204, 0.08);
+    color: #b8006b;
+}
+
+.tab-content {
+    flex: 1 1 0;
+    display: block;
+    min-height: 0;
+    min-width: 0;
+    overflow-y: auto;
+    padding-bottom: 10px;
+}
+
+.admin-section {
+    background: linear-gradient(135deg, rgba(20, 10, 30, 0.8) 0%, rgba(30, 10, 40, 0.6) 100%);
+    backdrop-filter: blur(10px);
+    padding: 15px;
+    border-radius: 16px;
+    border: 1px solid rgba(180, 0, 90, 0.2);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 
+                inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    position: relative;
+    transition: all 0.3s ease;
+    min-height: 0;  /* Important for flexbox children */
+}
+
+/* Form sections need scrolling only when necessary */
+.admin-section:has(.grid-form) {
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-gutter: stable;  /* Prevent layout shift */
+}
+
+/* Table sections need proper scrolling */
+.admin-section:has(table) {
+    overflow: hidden;  /* Container doesn't scroll */
+}
+
+.admin-section:has(table) > table {
+    display: block;
+    overflow-y: auto;
+    overflow-x: hidden;
+    max-height: calc(100% - 40px);  /* Account for h2 heading */
+}
+
+.admin-section::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 100%;
+    background: linear-gradient(45deg, transparent 30%, rgba(180, 0, 90, 0.05) 50%, transparent 70%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+    border-radius: 16px;
+}
+
+.admin-section:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 35px rgba(180, 0, 90, 0.15), 
+                inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    border-color: rgba(180, 0, 90, 0.3);
+}
+
+.admin-section:hover::before {
+    opacity: 0.5;
+    animation: sheen 0.8s ease-out;
+}
+
+@keyframes sheen {
+    0% {
+        transform: translateX(-100%) rotate(45deg);
+    }
+    100% {
+        transform: translateX(100%) rotate(45deg);
+    }
+}
+
+.admin-section h2 {
+    background: linear-gradient(135deg, #b8006b 0%, #d459a8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-transform: uppercase;
+    font-size: 1rem;
+    font-weight: 700;
+    margin: 0 0 10px 0;
+    flex-shrink: 0;
+    letter-spacing: 1px;
+}
+
+/* Login form specific styling */
+.login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+
+.login-form label {
+    color: rgba(255, 0, 174, 0.61);
+    font-size: 0.6rem;
+    margin-left: 0.5rem;
+    margin-bottom: -8px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 5px;
+    text-align: center;
+}
+
+.login-form input[type="text"],
+.login-form input[type="password"] {
+    background: rgba(5, 2, 10, 0.8);
+    border: 1px solid rgba(149, 84, 204, 0.3);
+    color: #c8b3d4;
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(5px);
+    width: 100%;
+    box-sizing: border-box;  /* Fix width overflow */
+}
+
+.login-form button {
+    margin-top: 8px;
+    width: 100%;
+}
+
+.grid-form {
+    display: grid;
+    gap: 10px;
+}
+
+.grid-form label {
+    color: #9554cc;
+    font-size: 0.8rem;
+    margin-bottom: -6px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.grid-form input[type="text"],
+.grid-form input[type="number"],
+.grid-form input[type="password"],
+.grid-form select {
+    background: rgba(5, 2, 10, 0.8);
+    border: 1px solid rgba(149, 84, 204, 0.3);
+    color: #c8b3d4;
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(5px);
+    width: 100%;
+    box-sizing: border-box;  /* Ensure consistent widths */
+}
+
+.grid-form input[type="text"]:focus,
+.grid-form input[type="number"]:focus,
+.grid-form input[type="password"]:focus,
+.grid-form select:focus,
+.login-form input[type="text"]:focus,
+.login-form input[type="password"]:focus {
+    outline: none;
+    border-color: #b8006b;
+    box-shadow: 0 0 0 3px rgba(184, 0, 107, 0.2),
+                inset 0 0 20px rgba(184, 0, 107, 0.1);
+    background: rgba(10, 5, 15, 0.9);
+}
+
+/* Custom checkbox styling */
+.grid-form input[type="checkbox"] {
+    display: none;
+}
+
+.checkbox-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 5px;
+}
+
+.toggle-switch {
+    position: relative;
+    width: 50px;
+    height: 24px;
+    background: rgba(149, 84, 204, 0.3);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border: 1px solid rgba(149, 84, 204, 0.5);
+}
+
+.toggle-switch::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    background: #9554cc;
+    border-radius: 50%;
+    transition: all 0.3s ease;
+}
+
+input[type="checkbox"]:checked + .toggle-switch {
+    background: rgba(184, 0, 107, 0.3);
+    border-color: rgba(184, 0, 107, 0.5);
+}
+
+input[type="checkbox"]:checked + .toggle-switch::after {
+    transform: translateX(26px);
+    background: #b8006b;
+}
+
+.checkbox-label {
+    color: #c77dff;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.input-group {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    width: 100%;
+}
+
+.input-group input {
+    width: 100%;
+}
+
+.input-group button {
+    white-space: nowrap;
+}
+
+button {
+    background: linear-gradient(135deg, #b8006b 0%, #d459a8 100%);
+    color: #ffffff;  /* Pure white for better contrast on buttons */
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.5px;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 2px 10px rgba(184, 0, 107, 0.3);
+}
+
+button::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    transition: left 0.5s ease;
+}
+
+button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 15px rgba(184, 0, 107, 0.4);
+}
+
+button:hover::before {
+    left: 100%;
+}
+
+button:active {
+    transform: translateY(0);
+}
+
+/* Share buttons - full width */
+button[type="submit"] {
+    width: 100%;
+    padding: 10px 16px;
+    margin-top: 5px;
+}
+
+/* Lookup buttons - darker purple */
+#lookup-title-button,
+#lookup-tag-button {
+    background: linear-gradient(135deg, #2a0a3f 0%, #3a0a5f 100%);
+    box-shadow: 0 2px 10px rgba(42, 10, 63, 0.3);
+    color: #ffffff;  /* White text on dark purple */
+}
+
+#lookup-title-button:hover,
+#lookup-tag-button:hover {
+    box-shadow: 0 4px 15px rgba(42, 10, 63, 0.5);
+}
+
+#logout-button {
+    background: linear-gradient(135deg, #cc0055 0%, #ff2244 100%);
+    box-shadow: 0 2px 10px rgba(204, 0, 85, 0.3);
+    color: #ffffff;  /* White text */
+}
+
+#logout-button:hover {
+    box-shadow: 0 4px 15px rgba(204, 0, 85, 0.5);
+}
+
+#refresh-shares {
+    background: linear-gradient(135deg, #2a0a3f 0%, #3a0a5f 100%);
+    box-shadow: 0 2px 10px rgba(42, 10, 63, 0.3);
+    color: #ffffff !important;  /* White text */
+}
+
+#refresh-shares:hover {
+    box-shadow: 0 4px 15px rgba(42, 10, 63, 0.5);
+}
+
+.success-message {
+    color: #d459a8;
+    font-size: 0.85rem;
+    margin-top: 10px;
+    text-shadow: 0 0 10px rgba(212, 89, 168, 0.5);
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+.error-message {
+    color: #ff2244;
+    font-size: 0.85rem;
+    margin-top: 10px;
+    text-shadow: 0 0 10px rgba(255, 34, 68, 0.5);
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+    table-layout: fixed;
+}
+
+th {
+    background: rgba(10, 5, 15, 0.9);
+    color: #d459a8;
+    padding: 10px 8px;
+    text-align: left;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    border-bottom: 2px solid rgba(184, 0, 107, 0.3);
+}
+
+/* Column widths */
+th:nth-child(1) { /* Video/Tag Name */
+    width: auto;
+}
+
+th:nth-child(2) { /* Hits */
+    width: 50px;
+    text-align: center;
+}
+
+th:nth-child(3) { /* Expires */
+    width: 70px;
+}
+
+th:nth-child(4) { /* Actions */
+    width: 200px;
+    text-align: center;
+}
+
+td {
+    padding: 10px 8px;
+    border-bottom: 1px solid rgba(149, 84, 204, 0.1);
+    color: #c8b3d4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+td:nth-child(2) { /* Hits */
+    text-align: center;
+    width: 50px;
+}
+
+td:nth-child(3) { /* Expires */
+    width: 70px;
+}
+
+td:nth-child(4) { /* Actions */
+    text-align: center;
+    white-space: nowrap;
+    width: 200px;
+}
+
+tr {
+    transition: background-color 0.2s ease;  /* Only transition background, not transform */
+}
+
+tr:hover {
+    background: rgba(184, 0, 107, 0.1);
+    /* Removed transform to prevent size changes */
+}
+
+table button {
+    padding: 4px 8px;
+    margin: 0 2px;
+    font-size: 0.7rem;
+}
+
+table a {
+    color: #d459a8;
+    text-decoration: none;
+    margin-right: 10px;
+    transition: all 0.2s ease;
+}
+
+table a:hover {
+    color: #b8006b;
+    text-shadow: 0 0 10px rgba(184, 0, 107, 0.5);
+}
+
+.copy-button {
+    background: linear-gradient(135deg, #5209a7 0%, #3a0b7d 100%);
+    box-shadow: 0 2px 8px rgba(82, 9, 167, 0.3);
+}
+
+.edit-button, .edit-tag-button {
+    background: linear-gradient(135deg, #8517ae 0%, #b8228f 100%);
+    box-shadow: 0 2px 8px rgba(133, 23, 174, 0.3);
+}
+
+.delete-button, .delete-tag-button {
+    background: linear-gradient(135deg, #cc0055 0%, #ff2244 100%);
+    box-shadow: 0 2px 8px rgba(204, 0, 85, 0.3);
+}
+
+#tag-info {
+    background: rgba(5, 2, 10, 0.8);
+    padding: 10px;
+    border-radius: 8px;
+    margin: 5px 0;  /* Reduced margin */
+    font-size: 0.8rem;
+    border: 1px solid rgba(149, 84, 204, 0.2);
+    grid-column: 1 / -1;  /* Span full width */
+}
+
+#tag-info p {
+    margin: 0;
+    color: #9554cc;
+}
+
+/* Modal styles */
+#edit-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: linear-gradient(135deg, rgba(20, 10, 30, 0.98) 0%, rgba(30, 10, 40, 0.98) 100%);
+    padding: 30px;
+    border-radius: 16px;
+    border: 1px solid rgba(184, 0, 107, 0.3);
+    z-index: 1000;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6),
+                0 0 100px rgba(184, 0, 107, 0.2);
+    max-width: 500px;
+    width: 90%;
+    backdrop-filter: blur(20px);
+}
+
+#edit-modal h3 {
+    background: linear-gradient(135deg, #b8006b 0%, #d459a8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-top: 0;
+    font-size: 1.3rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.modal-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+/* Login section styles */
+#login-section {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    width: 100vw;
+    background: linear-gradient(135deg, #050507 0%, #0a050f 100%);
+    overflow: hidden;
+}
+
+#login-section .admin-section {
+    max-width: 400px;
+    width: 90%;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6),
+                0 0 100px rgba(184, 0, 107, 0.2);
+    overflow: visible;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+    width: 0px;
+    height: 0px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(5, 2, 10, 0.8);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: linear-gradient(135deg, #b8006b 0%, #d459a8 100%);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(135deg, #cc0055 0%, #ff2244 100%);
+}
+
+/* Table scrolling */
+.admin-section:has(table) {
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1200px) {
+    .admin-2pane {
+        flex-direction: column;
+        gap: 10px;
+    }
+}
+
+@media (max-width: 768px) {
+    .header {
+        padding: 10px 15px;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .header-left {
+        flex-direction: column;
+        text-align: center;
+    }
+
+    .header h1 {
+        font-size: 1rem;
+    }
+
+    .header-controls {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .admin-content-wrapper {
+        padding: 5px;
+    }
+
+    .admin-2pane {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .admin-section {
+        padding: 10px;
+    }
+}
+
+/* Fix for consistent styling */
+body > .container {
+    background: transparent;
+}
+
+/* Ensure all sections have proper scrolling */
+.admin-section {
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.admin-section table {
+    flex: 1;
+    min-height: 0;  /* Allow shrinking */
+}
+
+.admin-section table thead {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: table-header-group;
+}
+
+.admin-section table tbody {
+    display: table-row-group;
+}
+
+.admin-section table tr {
+    display: table-row;
+}
+
+
+

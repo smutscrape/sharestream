@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ video_name or 'Video' }}</title>
+    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
+    <link href="/static/video-player.css" rel="stylesheet">
+    <style>
+        html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+        .embed-stage { position: fixed; inset: 0; }
+        .video-js { width: 100% !important; height: 100% !important; border-radius: 0; }
+        .video-js .vjs-tech { object-fit: contain; }
+    </style>
+</head>
+<body>
+    <div class="embed-stage">
+        <video id="embed-player" class="video-js vjs-default-skin" controls preload="auto" playsinline loop poster="/static/default_thumbnail.jpg">
+            <source src="/share/{{ share_id }}/stream.m3u8" type="application/x-mpegURL">
+            Your browser does not support the video tag.
+        </video>
+    </div>
+    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+    <script>
+        var params = new URLSearchParams(location.search);
+        // Embedders (Mastodon, etc.) append ?autoplay=1 / ?auto_play=1 when the
+        // viewer clicks play. Browsers only allow autoplay when muted, so start
+        // muted and let the viewer unmute via the controls.
+        var wantAutoplay = params.has('autoplay') || params.has('auto_play');
+
+        var player = videojs('embed-player', {
+            controls: true,
+            preload: 'auto',
+            fluid: false,
+            controlBar: {
+                children: [
+                    'playToggle', 'currentTimeDisplay', 'progressControl',
+                    'durationDisplay', 'volumePanel', 'fullscreenToggle'
+                ]
+            }
+        });
+
+        if (wantAutoplay) {
+            player.muted(true);
+            player.ready(function () {
+                var p = player.play();
+                if (p && p.catch) { p.catch(function () {}); }
+            });
+        }
+    </script>
+</body>
+</html>

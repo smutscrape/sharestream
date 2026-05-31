@@ -1,0 +1,16 @@
+.env
+.secret_key
+config.yaml
+shared_videos.db
+shared_videos.db-wal
+shared_videos.db-shm
+static/shares/*
+data/
+static/images/*
+static/localized/*
+__pycache__
+__pycaches/
+*.DS_Store
+*/.DS_Store
+.vscode/
+.vscode/*

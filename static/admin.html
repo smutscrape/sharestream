@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel</title>
+    <link rel="icon" type="image/x-icon" href="/static/localized/favicon.ico" onerror="this.onerror=null;this.href='/static/favicon.ico';">
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/admin.css">
+    <link rel="stylesheet" href="/fonts.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Login Section -->
+        <div id="login-section">
+            <div class="admin-section" style="max-width: 400px; margin: 0 auto;">
+                <h2>Login</h2>
+                <form id="login-form" class="login-form">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" placeholder="" required>
+                    <label for="password">Password</label>
+                    <input type="password" id="password" placeholder="" required>
+                    <button type="submit">Login</button>
+                </form>
+                <p id="login-error" class="error-message"></p>
+            </div>
+        </div>
+
+        <!-- Admin Content (hidden until logged in) -->
+        <div id="admin-content" style="display: none;">
+            <div class="header">
+                <div class="header-left">
+                    <a id="logo-link" href="/" style="display: inline-block;">
+                        <img
+                            src="/static/localized/logo.svg"
+                            alt="Logo"
+                            class="logo"
+                            onerror="this.onerror=null;this.src='/static/sharestream.svg';"
+                        >
+                    </a>
+                    <h1><span id="site-name">Sharestream</span> Admin Panel</h1>
+                </div>
+                <div class="header-controls">
+                    <button id="refresh-shares">Refresh All</button>
+                    <button id="clear-cache" title="Clear the cached tag→video membership sets (use after retagging scenes in Stash)">Clear Cache</button>
+                    <button id="logout-button">Logout</button>
+                </div>
+            </div>
+            
+            <div class="admin-content-wrapper">
+                <div class="admin-2pane">
+                    <!-- Left: Share Forms with Tabs -->
+                    <div class="admin-section admin-pane" id="share-pane">
+                        <div class="tab-header">
+                            <button class="tab-btn active" id="tab-share-video">Share Video</button>
+                            <button class="tab-btn" id="tab-share-tag">Share Tag</button>
+                        </div>
+                        <div class="tab-content" id="tab-content-share-video">
+                            <h2>Share New Video</h2>
+                            <form id="share-form" class="grid-form">
+                                <label for="stash-id">Stash Video ID</label>
+                                <div class="input-group">
+                                    <input type="number" id="stash-id" required>
+                                    <button type="button" id="lookup-title-button">Lookup</button>
+                                </div>
+                                <label for="video-name">Video Name</label>
+                                <input type="text" id="video-name" required>
+                                <label for="days-valid">Days Valid</label>
+                                <input type="number" id="days-valid" value="7" required>
+                                <label for="resolution">Resolution</label>
+                                <select id="resolution" required>
+                                    <option value="LOW">Low</option>
+                                    <option value="MEDIUM" selected>Medium</option>
+                                    <option value="HIGH">High</option>
+                                </select>
+                                <label for="share-id-type-video">Share ID Type</label>
+                                <select id="share-id-type-video" required>
+                                    <option value="random" selected>Random</option>
+                                    <option value="custom">Custom</option>
+                                </select>
+                                <label for="custom-share-id-video" style="display: none;">Custom Share ID</label>
+                                <input type="text" id="custom-share-id-video" placeholder="e.g. clip" style="display: none;">
+                                <label for="embed-mode-video">Social Embed</label>
+                                <select id="embed-mode-video">
+                                    <option value="" selected>Use default</option>
+                                    <option value="preview">Preview clip</option>
+                                    <option value="full">Full video</option>
+                                    <option value="dynamic">Dynamic</option>
+                                </select>
+                                <label for="share-password">Password (optional)</label>
+                                <input type="password" id="share-password" placeholder="Password">
+                                <div style="grid-column: 1 / -1; margin-top: 5px;">
+                                    <label class="checkbox-wrapper">
+                                        <input type="checkbox" id="show-in-gallery">
+                                        <span class="toggle-switch"></span>
+                                        <span class="checkbox-label">Feature on Home?</span>
+                                    </label>
+                                </div>
+                                <button type="submit" style="grid-column: 1 / -1;">Share Video</button>
+                            </form>
+                            <p id="share-message" class="success-message"></p>
+                            <p id="share-error" class="error-message"></p>
+                        </div>
+                        <div class="tab-content" id="tab-content-share-tag" style="display:none;">
+                            <h2>Share Tag</h2>
+                            <form id="share-tag-form" class="grid-form">
+                                <label for="tag-name">Tag Name</label>
+                                <div class="input-group">
+                                    <input type="text" id="tag-name" placeholder="e.g., 'POV'" required>
+                                    <button type="button" id="lookup-tag-button">Lookup</button>
+                                </div>
+                                <label for="tag-id">Tag ID</label>
+                                <input type="text" id="tag-id" placeholder="Auto-filled after lookup" required readonly>
+                                <label for="share-id-type">Share ID Type</label>
+                                <select id="share-id-type" required>
+                                    <option value="random" selected>Random</option>
+                                    <option value="tag-name">Use Tag Name</option>
+                                    <option value="custom">Custom</option>
+                                </select>
+                                <label for="custom-share-id" style="display: none;">Custom Share ID</label>
+                                <input type="text" id="custom-share-id" placeholder="Enter custom share ID" style="display: none;">
+                                <label for="tag-days-valid">Days Valid</label>
+                                <input type="number" id="tag-days-valid" value="7" required>
+                                <label for="tag-resolution">Resolution</label>
+                                <select id="tag-resolution" required>
+                                    <option value="LOW">Low</option>
+                                    <option value="MEDIUM" selected>Medium</option>
+                                    <option value="HIGH">High</option>
+                                </select>
+                                <label for="embed-mode-tag">Social Embed</label>
+                                <select id="embed-mode-tag">
+                                    <option value="" selected>Use default</option>
+                                    <option value="preview">Preview clip</option>
+                                    <option value="full">Full video</option>
+                                    <option value="dynamic">Dynamic</option>
+                                </select>
+                                <label for="tag-share-password">Password (optional)</label>
+                                <input type="password" id="tag-share-password" placeholder="Password">
+                                <div style="grid-column: 1 / -1; margin-top: 5px;">
+                                    <label class="checkbox-wrapper">
+                                        <input type="checkbox" id="tag-show-in-gallery">
+                                        <span class="toggle-switch"></span>
+                                        <span class="checkbox-label">Feature on Home?</span>
+                                    </label>
+                                </div>
+                                <button type="submit" style="grid-column: 1 / -1;">Share Tag</button>
+                            </form>
+                            <p id="tag-share-message" class="success-message"></p>
+                            <p id="tag-share-error" class="error-message"></p>
+                        </div>
+                    </div>
+                    <!-- Right: Shares Tables with Tabs -->
+                    <div class="admin-section admin-pane" id="list-pane">
+                        <div class="tab-header">
+                            <button class="tab-btn active" id="tab-list-videos">Shared Videos</button>
+                            <button class="tab-btn" id="tab-list-tags">Shared Tags</button>
+                        </div>
+                        <div class="tab-content" id="tab-content-list-videos">
+                            <h2>Shared Videos</h2>
+                            <table id="shared-videos-table">
+                                <thead>
+                                    <tr>
+                                        <th>Video Name</th>
+                                        <th>Hits</th>
+                                        <th>Expires</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Rows will be added dynamically -->
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="tab-content" id="tab-content-list-tags" style="display:none;">
+                            <h2>Shared Tags</h2>
+                            <table id="shared-tags-table">
+                                <thead>
+                                    <tr>
+                                        <th>Tag Name</th>
+                                        <th>Hits</th>
+                                        <th>Expires</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Rows will be added dynamically -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Edit Modal (Hidden by default) -->
+        <div id="edit-modal" style="display: none;">
+            <h3>Edit Share</h3>
+            <form class="grid-form">
+                <input type="hidden" id="edit-share-id">
+                <label for="edit-video-name">Video Name</label>
+                <input type="text" id="edit-video-name" required>
+                <label for="edit-days-valid">Days Valid</label>
+                <input type="number" id="edit-days-valid" required>
+                <label for="edit-resolution">Resolution</label>
+                <select id="edit-resolution" required>
+                    <option value="LOW">Low</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="HIGH">High</option>
+                </select>
+                <label for="edit-embed-mode">Social Embed</label>
+                <select id="edit-embed-mode">
+                    <option value="">Use default</option>
+                    <option value="preview">Preview clip</option>
+                    <option value="full">Full video</option>
+                    <option value="dynamic">Dynamic</option>
+                </select>
+                <label for="edit-share-password">Password (leave blank to keep)</label>
+                <input type="password" id="edit-share-password" placeholder="Password">
+                <div style="grid-column: 1 / -1; margin-top: 5px;">
+                    <label class="checkbox-wrapper">
+                        <input type="checkbox" id="edit-show-in-gallery">
+                        <span class="toggle-switch"></span>
+                        <span class="checkbox-label">Feature on Home?</span>
+                    </label>
+                    <label class="checkbox-wrapper" style="margin-left: 16px;">
+                        <input type="checkbox" id="edit-clear-password">
+                        <span class="toggle-switch"></span>
+                        <span class="checkbox-label">Remove password</span>
+                    </label>
+                </div>
+                <div class="modal-buttons">
+                    <button type="button" id="save-edit-button">Save Changes</button>
+                    <button type="button" id="cancel-edit-button">Cancel</button>
+                </div>
+            </form>
+            <p id="edit-error" class="error-message"></p>
+        </div>
+
+        <!-- Edit Tag Modal (Hidden by default) -->
+        <div id="edit-tag-modal" style="display: none;">
+            <h3>Edit Tag Share</h3>
+            <form class="grid-form">
+                <input type="hidden" id="edit-tag-share-id">
+                <label for="edit-tag-name">Tag Name</label>
+                <input type="text" id="edit-tag-name" required>
+                <label for="edit-tag-id">Tag ID</label>
+                <input type="text" id="edit-tag-id" readonly>
+                <label for="edit-tag-days-valid">Days Valid</label>
+                <input type="number" id="edit-tag-days-valid" required>
+                <label for="edit-tag-resolution">Resolution</label>
+                <select id="edit-tag-resolution" required>
+                    <option value="LOW">Low</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="HIGH">High</option>
+                </select>
+                <label for="edit-tag-embed-mode">Social Embed</label>
+                <select id="edit-tag-embed-mode">
+                    <option value="">Use default</option>
+                    <option value="preview">Preview clip</option>
+                    <option value="full">Full video</option>
+                    <option value="dynamic">Dynamic</option>
+                </select>
+                <label for="edit-tag-share-password">Password (leave blank to keep)</label>
+                <input type="password" id="edit-tag-share-password" placeholder="Password">
+                <div style="grid-column: 1 / -1; margin-top: 5px;">
+                    <label class="checkbox-wrapper">
+                        <input type="checkbox" id="edit-tag-show-in-gallery">
+                        <span class="toggle-switch"></span>
+                        <span class="checkbox-label">Feature on Home?</span>
+                    </label>
+                    <label class="checkbox-wrapper" style="margin-left: 16px;">
+                        <input type="checkbox" id="edit-tag-clear-password">
+                        <span class="toggle-switch"></span>
+                        <span class="checkbox-label">Remove password</span>
+                    </label>
+                </div>
+                <div class="modal-buttons">
+                    <button type="button" id="save-edit-tag-button">Save Changes</button>
+                    <button type="button" id="cancel-edit-tag-button">Cancel</button>
+                </div>
+            </form>
+            <p id="edit-tag-error" class="error-message"></p>
+        </div>
+    </div>
+
+<script src="/static/admin.js"></script>
+</body>
+</html>

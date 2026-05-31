@@ -1,0 +1,76 @@
+site_name: "Sharestream"  # Optional: defaults to "Sharestream" if not set
+site_motto: "Your private video collection"  # Optional: displayed under logo on gallery pages
+social_links:  # Optional: social media links displayed at bottom of pages
+  - name: "Bluesky"
+    logo: "https://bsky.social/favicon.ico"
+    url: "https://bsky.app/profile/example.bsky.social"
+  - name: "Mastodon"
+    logo: "./static/social_logos/mastodon.svg"
+    url: "https://mastodon.social/@example"
+  - name: "Forgejo"
+    logo: "./static/social_logos/forgejo.svg"
+    url: "https://codeberg.org/sharestream/sharestream"
+
+# Font customization: To override fonts, place .woff2 files in ./static/localized/fonts/ with these exact names:
+#   - motto_font.woff2    (for site motto text)
+#   - title_font.woff2    (for headings)
+#   - button_font.woff2   (for buttons)
+#   - disclaimer_font.woff2 (for disclaimer text)
+#   - base_font.woff2     (for body text)
+
+sharestream:
+  host: 127.0.0.1
+  port: 6669
+  base_domain: https://example.com
+  admin_username: admin
+  admin_password: your_secure_password
+  default_resolution: MEDIUM # LOW MEDIUM OR HIGH
+  share_id_length: 8
+  # Optional. Signs admin sessions and per-share password-unlock cookies. If you
+  # omit it, a key is generated once and persisted to ./.secret_key so logins and
+  # share passwords survive restarts. Set an explicit value here (any long random
+  # string) if you run multiple workers/nodes, so they all share one key.
+  # secret_key: "change-me-to-a-long-random-string"
+
+stash:
+  server_ip: 127.0.0.1
+  port: 5588
+  api_key: yourStashAPIKeyGoesHere
+  # limit_to_tag: 10844 # Optional: If set, only include videos that have BOTH the shared tag and this tag (by tag ID)
+
+# Social-embed (og:video) policy for link previews on Lemmy/Mastodon/etc.
+# mode: preview | full | dynamic   (can be overridden per-share in the admin panel)
+#   preview = always embed the short Stash preview clip (good for long videos)
+#   full    = always embed the full video
+#   dynamic = embed the full video only when it is small on BOTH axes below,
+#             otherwise fall back to the preview clip
+embed:
+  mode: dynamic
+  max_full_duration: 60   # seconds (null/omit to ignore this limit)
+  max_full_size_mb: 50    # megabytes (null/omit to ignore this limit)
+
+# Caching policy.
+# Media requests (thumbnails, HLS segments, previews, mp4/webp) verify that a
+# requested video belongs to a shared tag before proxying it from Stash. That
+# membership check is cached per tag for this many minutes so repeated media
+# hits don't re-query Stash every time. Defaults to 15 if omitted. You can clear
+# it on demand from the admin panel ("Clear Cache") — useful right after you
+# retag scenes in Stash and want a shared collection to reflect the change.
+cache:
+  tag_membership_ttl_minutes: 15
+
+# SMTP configuration for DMCA takedown requests
+contact_form:
+  mailto: where@takedowns.go  # Email address to receive DMCA requests
+  host: mail.myemailserver.com  # SMTP server hostname
+  port: 465  # SMTP port (typically 465 for SSL/TLS, 587 for STARTTLS)
+  user: me@myemailserver.com  # SMTP username
+  pass: my_SMTP_passw0rd  # SMTP password
+
+# Optional content warning / age gate. If set, first-time visitors to the home
+# page see a frosted-glass overlay with this message and an "Enter" button;
+# clicking it sets a cookie so they aren't prompted again. Omit/leave empty to disable.
+content_warning: "This site contains sexually explicit material intended only for adults. By entering, you confirm that you are at least 18 years old (or the age of majority in your jurisdiction) and that you wish to view such content."
+
+disclaimer: "This content is shared for private use only. Unauthorized distribution is prohibited. This site does not encourage/condone illegal sexual conduct and is intended solely to provide visual pleasure for ADULTS only. Please leave this site if you are under 18 or if you find mature/explicit content offensive. All mature/explicit content on this site is strictly in compliance with 18 U.S.C. § Code 2257 i.e. all performers featured are 18 years or older of age. This site and all its associated domains being in accordance with 17 U.S.C. § 512 and the Digital Millennium Copyright Act, responds to infringement notices within 24 hours."
+

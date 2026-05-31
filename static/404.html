@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Not Found - {{ site_name or 'Sharestream' }}</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/fonts.css">
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="apple-touch-icon" href="/favicon.png">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <a href="{{ base_domain }}">
+                <img src="{{ logo_path }}" srcset="{{ srcset }}" alt="Logo" class="logo">
+            </a>
+            {% if site_motto %}
+            <div class="site-motto">{{ site_motto }}</div>
+            {% endif %}
+        </header>
+
+        <div class="not-found">
+            <h1 class="not-found-title">Nothing to see here</h1>
+            <p class="not-found-text">
+                This page doesn't exist &mdash; it may have expired, or it might
+                never have existed in the first place.
+            </p>
+            <a class="not-found-home" href="{{ base_domain }}">&larr; Back to home</a>
+        </div>
+
+        {% if social_links %}
+        <div class="social-links">
+            {% for link in social_links %}
+            <a href="{{ link.url }}" target="_blank" rel="{% if link.rel %}{{ link.rel }} {% endif %}noopener noreferrer" title="{{ link.name }}">
+                <img src="{% if link.logo.startswith('http') %}{{ link.logo }}{% else %}/{{ link.logo.lstrip('./') }}{% endif %}"
+                     {% if link.logo_2x %}srcset="{% if link.logo_2x.startswith('http') %}{{ link.logo_2x }}{% else %}/{{ link.logo_2x.lstrip('./') }}{% endif %} 2x{% if link.logo_3x %}, {% if link.logo_3x.startswith('http') %}{{ link.logo_3x }}{% else %}/{{ link.logo_3x.lstrip('./') }}{% endif %} 3x{% endif %}"{% endif %}
+                     alt="{{ link.name }}"
+                     width="64" height="64">
+            </a>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="footer-links">
+            <a href="/dmca">DMCA Takedown Request</a>
+        </div>
+
+        <p class="disclaimer">{{ disclaimer }}</p>
+    </div>
+</body>
+</html>

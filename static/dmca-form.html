@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DMCA Takedown Request - {{ site_name or 'Sharestream' }}</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/fonts.css">
+    <link rel="icon" type="image/x-icon" href="/static/localized/favicon.ico" onerror="this.onerror=null;this.href='/static/favicon.ico';">
+    <style>
+        .dmca-form {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f8f8f8;
+            border-radius: 8px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            font-family: inherit;
+        }
+        
+        .form-group textarea {
+            min-height: 150px;
+            resize: vertical;
+        }
+        
+        .form-group .required {
+            color: #e74c3c;
+        }
+        
+        .form-group .help-text {
+            font-size: 14px;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .submit-button {
+            background-color: #007bff;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        
+        .submit-button:hover {
+            background-color: #0056b3;
+        }
+        
+        .submit-button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        .success-message,
+        .error-message {
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        .success-message {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .error-message {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        .loading.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <a href="{{ base_domain }}">
+                <img src="{{ logo_path }}" srcset="{{ srcset }}" alt="Logo" class="logo">
+            </a>
+            {% if site_motto %}
+            <div class="site-motto">{{ site_motto }}</div>
+            {% endif %}
+        </header>
+        
+        <h1>DMCA Takedown Request</h1>
+        
+        <div id="message-container"></div>
+        
+        <div class="dmca-form">
+            <form id="dmca-form" method="POST" action="/dmca/submit">
+                <div class="form-group">
+                    <label for="requester_name">
+                        Requester Name or Company <span class="required">*</span>
+                    </label>
+                    <input type="text" id="requester_name" name="requester_name" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="requester_email">
+                        Requester Email <span class="required">*</span>
+                    </label>
+                    <input type="email" id="requester_email" name="requester_email" required>
+                    <div class="help-text">We will use this email to contact you regarding your request</div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="requester_website">
+                        Requester Website
+                    </label>
+                    <input type="url" id="requester_website" name="requester_website" placeholder="https://example.com">
+                    <div class="help-text">Optional: Your company or personal website</div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="infringing_links">
+                        Allegedly Infringing Links <span class="required">*</span>
+                    </label>
+                    <textarea id="infringing_links" name="infringing_links" required placeholder="Please list all URLs that you believe infringe on your copyright. One URL per line."></textarea>
+                    <div class="help-text">Please provide specific URLs from this site that you believe infringe on your copyright</div>
+                </div>
+                
+                <div class="loading" id="loading">
+                    <p>Submitting your request...</p>
+                </div>
+                
+                <button type="submit" class="submit-button" id="submit-button">Submit DMCA Request</button>
+            </form>
+        </div>
+        
+        {% if social_links %}
+        <div class="social-links">
+            {% for link in social_links %}
+            <a href="{{ link.url }}" target="_blank" rel="{% if link.rel %}{{ link.rel }} {% endif %}noopener noreferrer" title="{{ link.name }}">
+                <img src="{% if link.logo.startswith('http') %}{{ link.logo }}{% else %}/{{ link.logo.lstrip('./') }}{% endif %}"
+                     {% if link.logo_2x %}srcset="{% if link.logo_2x.startswith('http') %}{{ link.logo_2x }}{% else %}/{{ link.logo_2x.lstrip('./') }}{% endif %} 2x{% if link.logo_3x %}, {% if link.logo_3x.startswith('http') %}{{ link.logo_3x }}{% else %}/{{ link.logo_3x.lstrip('./') }}{% endif %} 3x{% endif %}"{% endif %}
+                     alt="{{ link.name }}"
+                     width="64" height="64">
+            </a>
+            {% endfor %}
+        </div>
+        {% endif %}
+        
+        <p class="disclaimer">{{ disclaimer }}</p>
+    </div>
+    
+    <script>
+        document.getElementById('dmca-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const form = e.target;
+            const submitButton = document.getElementById('submit-button');
+            const loading = document.getElementById('loading');
+            const messageContainer = document.getElementById('message-container');
+            
+            // Clear previous messages
+            messageContainer.innerHTML = '';
+            
+            // Disable submit button and show loading
+            submitButton.disabled = true;
+            loading.classList.add('active');
+            
+            // Prepare form data
+            const formData = {
+                requester_name: form.requester_name.value,
+                requester_email: form.requester_email.value,
+                requester_website: form.requester_website.value || '',
+                infringing_links: form.infringing_links.value
+            };
+            
+            try {
+                const response = await fetch('/dmca/submit', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(formData)
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    messageContainer.innerHTML = `<div class="success-message">${data.message}</div>`;
+                    form.reset();
+                } else {
+                    messageContainer.innerHTML = `<div class="error-message">Error: ${data.detail || 'Failed to submit request'}</div>`;
+                }
+            } catch (error) {
+                messageContainer.innerHTML = `<div class="error-message">Error: Failed to submit request. Please try again later.</div>`;
+            } finally {
+                submitButton.disabled = false;
+                loading.classList.remove('active');
+                // Scroll to message
+                messageContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        });
+    </script>
+</body>
+</html> 

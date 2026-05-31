@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if tag_name %}{{ tag_name }} - {{ site_name or 'Sharestream' }}{% else %}{{ site_name or 'Sharestream' }}{% endif %}</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/fonts.css">
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="apple-touch-icon" href="/favicon.png">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <a href="{{ base_domain }}">
+                <img src="{{ logo_path }}" srcset="{{ srcset }}" alt="Logo" class="logo">
+            </a>
+            {% if site_motto %}
+            <div class="site-motto">{{ site_motto }}</div>
+            {% endif %}
+        </header>
+        
+        {% if tag_name %}
+        <h1>Tag: {{ tag_name }}</h1>
+        {% endif %}
+        
+        <!-- Sort Dropdown -->
+        <div class="sort-container">
+            <label for="sort-select">Sort by:</label>
+            <select id="sort-select">
+                <option value="date" {% if sort == 'date' %}selected{% endif %}>Date</option>
+                <option value="title" {% if sort == 'title' %}selected{% endif %}>Title</option>
+                <option value="hits" {% if sort == 'hits' %}selected{% endif %}>Play Count</option>
+                <option value="rating" {% if sort == 'rating' %}selected{% endif %}>Rating</option>
+                <option value="random" {% if sort == 'random' %}selected{% endif %}>Random</option>
+            </select>
+        </div>
+        
+        <div class="gallery" id="gallery">
+            {% for video in video_cards %}
+            <div class="video-card" data-preview-url="{{ video.preview_url }}">
+                <a href="{{ video.share_url }}">
+                    {% if video.lazy_thumbnail_url %}
+                    <img src="/static/default_thumbnail.jpg" 
+                         data-lazy-src="{{ video.lazy_thumbnail_url }}"
+                         alt="{{ video.video_name }}"
+                         class="lazy-load">
+                    {% else %}
+                    <img src="{{ video.thumbnail_url }}" alt="{{ video.video_name }}">
+                    {% endif %}
+                    <img class="preview-webp" alt="" loading="lazy">
+                    {% if video.hits > 0 %}
+                    <div class="hit-counter">
+                        <svg class="eye-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 5C7 5 2.73 8.11 1 12.5C2.73 16.89 7 20 12 20C17 20 21.27 16.89 23 12.5C21.27 8.11 17 5 12 5Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <circle cx="12" cy="12.5" r="3" stroke="currentColor" stroke-width="2"/>
+                        </svg>
+                        <span>{{ video.hits }}</span>
+                    </div>
+                    {% endif %}
+                    <div class="title">{{ video.video_name }}</div>
+                </a>
+            </div>
+            {% endfor %}
+        </div>
+        
+        {% if current_page %}
+        <div class="pagination">
+            {% if has_prev_page %}
+            <a href="{{ prev_page_url }}">← Previous</a>
+            {% endif %}
+            <span class="current">Page {{ current_page }}</span>
+            {% if has_next_page %}
+            <a href="{{ next_page_url }}">Next →</a>
+            {% endif %}
+        </div>
+        {% endif %}
+        
+        <div id="loading" style="display: none;">Loading more videos...</div>
+        
+        {% if social_links %}
+        <div class="social-links">
+            {% for link in social_links %}
+            <a href="{{ link.url }}" target="_blank" rel="{% if link.rel %}{{ link.rel }} {% endif %}noopener noreferrer" title="{{ link.name }}">
+                <img src="{% if link.logo.startswith('http') %}{{ link.logo }}{% else %}/{{ link.logo.lstrip('./') }}{% endif %}"
+                     {% if link.logo_2x %}srcset="{% if link.logo_2x.startswith('http') %}{{ link.logo_2x }}{% else %}/{{ link.logo_2x.lstrip('./') }}{% endif %} 2x{% if link.logo_3x %}, {% if link.logo_3x.startswith('http') %}{{ link.logo_3x }}{% else %}/{{ link.logo_3x.lstrip('./') }}{% endif %} 3x{% endif %}"{% endif %}
+                     alt="{{ link.name }}"
+                     width="64" height="64">
+            </a>
+            {% endfor %}
+        </div>
+        {% endif %}
+        
+        <div class="footer-links">
+            <a href="/dmca">DMCA Takedown Request</a>
+        </div>
+        
+        <p class="disclaimer">{{ disclaimer }}</p>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Sorting dropdown logic
+            const sortSelect = document.getElementById('sort-select');
+            if (sortSelect) {
+                sortSelect.addEventListener('change', function() {
+                    const url = new URL(window.location.href);
+                    url.searchParams.set('sort', this.value);
+                    // Reset to page 1 when sort order changes
+                    if (url.searchParams.has('page')) {
+                        url.searchParams.set('page', '1');
+                    }
+                    window.location.href = url.toString();
+                });
+            }
+
+            // Hover-to-animate (animated WebP) for video cards.
+            const hoverTimers = new WeakMap();
+            document.querySelectorAll('.video-card').forEach(card => {
+                const previewUrl = card.getAttribute('data-preview-url');
+                const webp = card.querySelector('img.preview-webp');
+                if (!previewUrl || !webp) return;
+
+                card.addEventListener('mouseenter', function() {
+                    const t = setTimeout(() => {
+                        if (!webp.getAttribute('src')) webp.src = previewUrl;
+                        webp.classList.add('is-visible');
+                    }, 250);
+                    hoverTimers.set(card, t);
+                });
+                card.addEventListener('mouseleave', function() {
+                    clearTimeout(hoverTimers.get(card));
+                    webp.classList.remove('is-visible');
+                });
+            });
+
+            // Lazy loading for thumbnails
+            const lazyImages = document.querySelectorAll('img.lazy-load');
+            
+            if ('IntersectionObserver' in window) {
+                const imageObserver = new IntersectionObserver((entries, observer) => {
+                    entries.forEach(entry => {
+                        if (entry.isIntersecting) {
+                            const img = entry.target;
+                            const lazySrc = img.getAttribute('data-lazy-src');
+                            if (lazySrc) {
+                                // Create a new image to preload
+                                const newImg = new Image();
+                                newImg.onload = function() {
+                                    img.src = lazySrc;
+                                    img.classList.remove('lazy-load');
+                                };
+                                newImg.src = lazySrc;
+                                imageObserver.unobserve(img);
+                            }
+                        }
+                    });
+                }, {
+                    rootMargin: '50px 0px',
+                    threshold: 0.01
+                });
+                
+                lazyImages.forEach(img => imageObserver.observe(img));
+            } else {
+                // Fallback for browsers that don't support IntersectionObserver
+                lazyImages.forEach(img => {
+                    const lazySrc = img.getAttribute('data-lazy-src');
+                    if (lazySrc) {
+                        img.src = lazySrc;
+                        img.classList.remove('lazy-load');
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>

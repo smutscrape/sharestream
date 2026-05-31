@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ video_name or 'Video' }} - {{ site_name or 'Sharestream' }}</title>
+    
+    <!-- Open Graph / Social Media Meta Tags -->
+    {% set is_tag_share = share_id.startswith('tag-') and '-video-' in share_id %}
+    {% if is_tag_share %}
+        {% set parts = share_id.split('-video-') %}
+        {% set tag_share_id = parts[0][4:] %}
+        {% set video_id = parts[1] %}
+        {% set page_url  = base_domain + '/' + tag_share_id + '/' + video_id %}
+        {% set video_url = base_domain + '/tag/' + tag_share_id + '/video/' + video_id + '/stream.mp4' %}
+        {% set image_url = base_domain + '/tag/' + tag_share_id + '/video/' + video_id + '/thumb' %}
+    {% else %}
+        {% set page_url  = base_domain + '/' + share_id %}
+        {% set video_url = base_domain + '/share/' + share_id + '/stream.mp4' %}
+        {% set image_url = base_domain + '/share/' + share_id + '/thumb' %}
+    {% endif %}
+
+    {# The server resolves whether to embed the full video or the preview clip
+       (per-share/tag override, else the config default) and passes the URL. #}
+    {% if embed_video_url %}
+        {% set video_url = embed_video_url %}
+    {% endif %}
+
+    {# Bare player page (no site chrome) for iframe embeds, e.g. Mastodon's
+       twitter:player. share_id is the token or composite tag-video id. #}
+    {% set embed_url = base_domain + '/embed/' + share_id %}
+
+    {# Try to parse "WxH" from video_details.resolution; fall back to 1280x720 #}
+    {% set og_w = 1280 %}
+    {% set og_h = 720 %}
+    {% if video_details and video_details.resolution and 'x' in video_details.resolution %}
+        {% set _wh = video_details.resolution.split('x') %}
+        {% if _wh|length == 2 and _wh[0].isdigit() and _wh[1].isdigit() %}
+            {% set og_w = _wh[0]|int %}
+            {% set og_h = _wh[1]|int %}
+        {% endif %}
+    {% endif %}
+
+    <meta property="og:type"               content="video.other">
+    <meta property="og:site_name"          content="{{ site_name or 'Sharestream' }}">
+    <meta property="og:title"              content="{{ video_name or 'Video' }}">
+    <meta property="og:url"                content="{{ page_url }}">
+    <meta property="og:image"              content="{{ image_url }}">
+    <meta property="og:image:secure_url"   content="{{ image_url }}">
+    <meta property="og:video"              content="{{ video_url }}">
+    <meta property="og:video:url"          content="{{ video_url }}">
+    <meta property="og:video:secure_url"   content="{{ video_url }}">
+    <meta property="og:video:type"         content="video/mp4">
+    <meta property="og:video:width"        content="{{ og_w }}">
+    <meta property="og:video:height"       content="{{ og_h }}">
+    {% if video_details and video_details.details %}
+    <meta property="og:description"        content="{{ video_details.details[:200] }}">
+    {% else %}
+    <meta property="og:description"        content="Watch this video on {{ site_name or 'Sharestream' }}">
+    {% endif %}
+
+    {# Player Card: attempts an inline video player on X. Per X's official staff
+       post, player cards need no approval since 2018 — they render based purely
+       on technical compliance (frameable HTTPS twitter:player + accessible
+       twitter:image poster, which Twitterbot gets as JPEG). If X ever fails to
+       render the player, switch this value to "summary_large_image" for a
+       guaranteed static thumbnail. Mastodon uses twitter:player either way. #}
+    <meta name="twitter:card"              content="player">
+    <meta name="twitter:title"             content="{{ video_name or 'Video' }}">
+    <meta name="twitter:player"            content="{{ embed_url }}">
+    <meta name="twitter:player:stream"     content="{{ video_url }}">
+    <meta name="twitter:player:stream:content_type" content="video/mp4">
+    <meta name="twitter:player:width"      content="{{ og_w }}">
+    <meta name="twitter:player:height"     content="{{ og_h }}">
+    <meta name="twitter:image"             content="{{ image_url }}">
+
+    <link href="/static/styles.css" rel="stylesheet">
+    <link href="/fonts.css" rel="stylesheet">
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="apple-touch-icon" href="/favicon.png">
+    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
+    <link href="/static/video-player.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <a href="{{ base_domain }}" class="video-logo-link">
+            <img src="{{ logo_path }}" srcset="{{ srcset }}" alt="Logo" class="logo">
+        </a>
+        {% if site_motto %}
+        <div class="site-motto">{{ site_motto }}</div>
+        {% endif %}
+        <div class="video-stage">
+        <div class="video-container" id="video-box" data-arw="{{ og_w }}" data-arh="{{ og_h }}">
+            <video id="video-player" class="video-js vjs-default-skin" controls preload="auto" poster="/static/default_thumbnail.jpg" playsinline loop>
+                <source src="/share/{{ share_id }}/stream.m3u8" type="application/x-mpegURL">
+                Your browser does not support the video tag.
+            </video>
+        </div>
+        <script>
+            // Size the player box from Stash's known resolution during parse,
+            // before the (blocking) Video.js script loads, so a portrait video
+            // never flashes as a landscape box first.
+            (function () {
+                var box = document.getElementById('video-box');
+                if (!box) return;
+                var ratio = (parseFloat(box.dataset.arw) / parseFloat(box.dataset.arh)) || (16 / 9);
+                var boxW = Math.min(window.innerWidth * 0.8, window.innerHeight * 0.8 * ratio);
+                box.style.width = Math.round(boxW) + 'px';
+                box.style.height = Math.round(boxW / ratio) + 'px';
+            })();
+        </script>
+        {% if video_details %}
+        <div class="video-metadata">
+            <h1 class="video-title">
+                {% if video_details.title %}
+                    {{ video_details.title }}
+                {% elif video_details.files and video_details.files[0].basename %}
+                    {{ video_details.files[0].basename }}
+                {% elif video_name %}
+                    {{ video_name }}
+                {% else %}
+                    Untitled Video
+                {% endif %}
+            </h1>
+            
+            <div class="metadata-grid">
+                {% if video_details.details %}
+                <div class="metadata-section video-description">
+                    <h3>Description</h3>
+                    <p>{{ video_details.details }}</p>
+                </div>
+                {% endif %}
+                <div class="metadata-section">
+                    <h3>Statistics</h3>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <svg class="stat-icon eye-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M12 5C7 5 2.73 8.11 1 12.5C2.73 16.89 7 20 12 20C17 20 21.27 16.89 23 12.5C21.27 8.11 17 5 12 5Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                <circle cx="12" cy="12.5" r="3" stroke="currentColor" stroke-width="2"/>
+                            </svg>
+                            <div class="stat-value">{{ hit_count or 0 }}</div>
+                            <div class="stat-label">Views</div>
+                        </div>
+                        {% if video_details.rating %}
+                        <div class="stat-item">
+                            <svg class="stat-icon rating-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" fill="currentColor"/>
+                            </svg>
+                            <div class="stat-value">{{ video_details.rating }}%</div>
+                            <div class="stat-label">Rating</div>
+                        </div>
+                        {% endif %}
+                        {% if video_details.date %}
+                        <div class="stat-item">
+                            <svg class="stat-icon date-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z" fill="currentColor"/>
+                            </svg>
+                            <div class="stat-value">{{ video_details.date }}</div>
+                            <div class="stat-label">Date</div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% if video_details.performers %}
+                <div class="metadata-section">
+                    <h3>Performers</h3>
+                    <div class="metadata-list">
+                        {% for performer in video_details.performers %}
+                        <div class="metadata-item performer">
+                            <span class="performer-name">{{ performer.name }}</span>
+                            {% if performer.url or performer.twitter or performer.instagram %}
+                            <div class="performer-links">
+                                {% if performer.url %}
+                                <a href="{{ performer.url }}" target="_blank" rel="noopener noreferrer">Website</a>
+                                {% endif %}
+                                {% if performer.twitter %}
+                                <a href="{{ performer.twitter if performer.twitter.startswith('http') else 'https://twitter.com/' + performer.twitter }}" target="_blank" rel="noopener noreferrer">Twitter</a>
+                                {% endif %}
+                                {% if performer.instagram %}
+                                <a href="{{ performer.instagram if performer.instagram.startswith('http') else 'https://instagram.com/' + performer.instagram }}" target="_blank" rel="noopener noreferrer">Instagram</a>
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% if video_details.studio %}
+                <div class="metadata-section">
+                    <h3>Studio</h3>
+                    <div class="metadata-item">
+                        {% if video_details.studio.url %}
+                        <a href="{{ video_details.studio.url }}" target="_blank" rel="noopener noreferrer">{{ video_details.studio.name }}</a>
+                        {% else %}
+                        <span>{{ video_details.studio.name }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% if video_details.tags %}
+                <div class="metadata-section">
+                    <h3>Tags</h3>
+                    <div class="tag-list">
+                        {% for tag in video_details.tags %}
+                        <a href="/gallery/tag/{{ tag.name | urlencode }}" class="tag-item">{{ tag.name }}</a>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% if video_details.urls %}
+                <div class="metadata-section">
+                    <h3>Links</h3>
+                    <div class="metadata-list">
+                        {% for url in video_details.urls %}
+                        <a href="{{ url }}" target="_blank" rel="noopener noreferrer" class="external-link">{{ url }}</a>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% if video_details.date or video_details.duration or video_details.resolution %}
+                <div class="metadata-section">
+                    <h3>Details</h3>
+                    <div class="metadata-list">
+                        {% if video_details.date %}
+                        <div class="metadata-item">
+                            <span class="metadata-label">Date:</span> {{ video_details.date }}
+                        </div>
+                        {% endif %}
+                        {% if video_details.duration %}
+                        <div class="metadata-item">
+                            <span class="metadata-label">Duration:</span> {{ (video_details.duration / 60) | round(1) }} minutes
+                        </div>
+                        {% endif %}
+                        {% if video_details.resolution %}
+                        <div class="metadata-item">
+                            <span class="metadata-label">Resolution:</span> {{ video_details.resolution }}
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+        </div>
+        
+        {% if social_links %}
+        <div class="social-links">
+            {% for link in social_links %}
+            <a href="{{ link.url }}" target="_blank" rel="{% if link.rel %}{{ link.rel }} {% endif %}noopener noreferrer" title="{{ link.name }}">
+                <img src="{% if link.logo.startswith('http') %}{{ link.logo }}{% else %}/{{ link.logo.lstrip('./') }}{% endif %}"
+                     {% if link.logo_2x %}srcset="{% if link.logo_2x.startswith('http') %}{{ link.logo_2x }}{% else %}/{{ link.logo_2x.lstrip('./') }}{% endif %} 2x{% if link.logo_3x %}, {% if link.logo_3x.startswith('http') %}{{ link.logo_3x }}{% else %}/{{ link.logo_3x.lstrip('./') }}{% endif %} 3x{% endif %}"{% endif %}
+                     alt="{{ link.name }}"
+                     width="64" height="64">
+            </a>
+            {% endfor %}
+        </div>
+        {% endif %}
+        
+        <div class="footer-links">
+            <a href="/dmca">DMCA Takedown Request</a>
+        </div>
+        
+        <p class="disclaimer">{{ disclaimer }}</p>
+    </div>
+    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+    <script>
+        // Skip buttons. video.js 8 removed videojs.extend, so we subclass the
+        // Button component directly and register the components BEFORE the
+        // player is created so they exist when the control bar is built.
+        var Button = videojs.getComponent('Button');
+
+        class SkipBackwardButton extends Button {
+            constructor(player, options) {
+                super(player, options);
+                this.addClass('vjs-skip-backward-30');
+                this.controlText('Skip backward 30 seconds');
+                this.el().innerHTML = '<span class="vjs-icon-placeholder"></span>';
+            }
+            handleClick() {
+                var p = this.player();
+                p.currentTime(Math.max(0, p.currentTime() - 30));
+            }
+        }
+
+        class SkipForwardButton extends Button {
+            constructor(player, options) {
+                super(player, options);
+                this.addClass('vjs-skip-forward-30');
+                this.controlText('Skip forward 30 seconds');
+                this.el().innerHTML = '<span class="vjs-icon-placeholder"></span>';
+            }
+            handleClick() {
+                var p = this.player();
+                p.currentTime(Math.min(p.duration(), p.currentTime() + 30));
+            }
+        }
+
+        videojs.registerComponent('SkipBackwardButton', SkipBackwardButton);
+        videojs.registerComponent('SkipForwardButton', SkipForwardButton);
+
+        var player = videojs('video-player', {
+            fluid: true,
+            responsive: true,
+            controlBar: {
+                children: [
+                    'playToggle', 'SkipBackwardButton', 'currentTimeDisplay',
+                    'progressControl', 'durationDisplay', 'SkipForwardButton',
+                    'volumePanel', 'fullscreenToggle'
+                ]
+            }
+        });
+
+        // ---- Adaptive sizing ----
+        // Fit the player into the largest box that fits within 80% of the
+        // viewport height AND 80% of the viewport width, preserving the
+        // video's native aspect ratio. The metadata column then flows beside
+        // the player (via CSS flex-wrap) whenever horizontal room remains.
+        //
+        // The aspect ratio is known up front from Stash's stored resolution
+        // (read from the data attributes), so the box is sized correctly on
+        // the very first paint -- no landscape flash before a portrait video
+        // loads. Once the real decoded dimensions are available we refine in
+        // case the stored resolution was missing or rotated.
+        var box = document.getElementById('video-box');
+        var initialRatio = (box && parseFloat(box.dataset.arw) / parseFloat(box.dataset.arh)) || (16 / 9);
+
+        function fitVideoToViewport() {
+            var videoW = player.videoWidth();
+            var videoH = player.videoHeight();
+            var ratio = (videoW && videoH) ? (videoW / videoH) : initialRatio;
+            if (!ratio || !isFinite(ratio)) return;
+
+            var maxW = window.innerWidth * 0.8;
+            var maxH = window.innerHeight * 0.8;
+
+            // Largest box satisfying both bounds at the native aspect ratio.
+            var boxW = Math.min(maxW, maxH * ratio);
+            var boxH = boxW / ratio;
+
+            var container = document.querySelector('.video-container');
+            if (container) {
+                container.style.width = Math.round(boxW) + 'px';
+                container.style.height = Math.round(boxH) + 'px';
+            }
+
+            player.fluid(false);
+            var el = player.el();
+            el.style.width = '100%';
+            el.style.height = '100%';
+        }
+        fitVideoToViewport();
+        player.ready(fitVideoToViewport);
+        // The decoded dimensions can become available at any of these points
+        // (especially for HLS, where videoWidth() is often still 0 at
+        // loadedmetadata). Re-fitting on each is idempotent and means the
+        // layout snaps into place on its own, without needing a manual resize.
+        ['loadstart', 'loadedmetadata', 'loadeddata', 'canplay', 'playing', 'durationchange']
+            .forEach(function (ev) { player.on(ev, fitVideoToViewport); });
+        window.addEventListener('resize', fitVideoToViewport);
+    </script>
+
+</body>
+</html>
