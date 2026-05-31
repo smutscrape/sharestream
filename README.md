@@ -1,4 +1,4 @@
-![Logo Placeholder](static/logo-placeholder@0.5x.png)
+![Logo Placeholder](https://codeberg.org/sharestream/sharestream/raw/branch/main/static/sharestream.svg)
 
 # Sharestream
 
