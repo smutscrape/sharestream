@@ -162,11 +162,20 @@ async def find_tag_by_name(tag_name: str) -> dict | None:
         return None
 
 
-async def get_videos_by_tag(tag_id: str, page: int = 1, per_page: int = 1000, sort_by: str = 'date') -> tuple[list, int]:
-    """Get videos that have a specific tag - returns (videos, total_count)"""
+async def get_videos_by_tag(tag_id: str, page: int = 1, per_page: int = 1000, sort_by: str = 'date',
+                            respect_limit_tag: bool = True) -> tuple[list, int]:
+    """Get videos that have a specific tag - returns (videos, total_count).
+
+    ``respect_limit_tag`` (default True) controls whether the global
+    ``limit_to_tag`` safety filter is applied. Password-protected tag shares
+    pass ``respect_limit_tag=False`` so a vetted, password-gated share can reach
+    the tag's full contents while public shares stay limited to the approved
+    tag. When ``limit_to_tag`` is unset this argument has no effect.
+    """
     # Compose tag filter
+    apply_limit = bool(LIMIT_TO_TAG) and respect_limit_tag
     tag_values = [tag_id]
-    if LIMIT_TO_TAG:
+    if apply_limit:
         tag_values = [str(LIMIT_TO_TAG), str(tag_id)]
     query = {
         "operationName": "FindScenes",
@@ -183,7 +192,7 @@ async def get_videos_by_tag(tag_id: str, page: int = 1, per_page: int = 1000, so
                     "value": tag_values,
                     "excludes": [],
                     "modifier": "INCLUDES_ALL",
-                    "depth": 0 if LIMIT_TO_TAG else -1
+                    "depth": 0 if apply_limit else -1
                 }
             }
         },
@@ -277,13 +286,17 @@ async def get_videos_by_tag(tag_id: str, page: int = 1, per_page: int = 1000, so
         return [], 0
 
 
-async def get_all_videos_by_tag(tag_id: str) -> list:
-    """Helper to get all videos for a tag, handling pagination."""
+async def get_all_videos_by_tag(tag_id: str, respect_limit_tag: bool = True) -> list:
+    """Helper to get all videos for a tag, handling pagination.
+
+    ``respect_limit_tag`` is forwarded to :func:`get_videos_by_tag` (see there).
+    """
     all_videos = []
     page = 1
     per_page = 1000
     while True:
-        videos, total_count = await get_videos_by_tag(tag_id, page=page, per_page=per_page)
+        videos, total_count = await get_videos_by_tag(tag_id, page=page, per_page=per_page,
+                                                       respect_limit_tag=respect_limit_tag)
         if not videos:
             break
         all_videos.extend(videos)

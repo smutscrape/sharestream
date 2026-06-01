@@ -49,7 +49,7 @@ Share groups of videos with a single link:
 | **Admin Dashboard** | Full create / edit / delete management for both individual and collection shares |
 | **Secure Sharing** | Optional per‑share passwords and expiring links |
 | **Resolution Control** | Choose streaming quality: LOW, MEDIUM, or HIGH |
-| **Access Safety Net** | Optional `limit_to_tag` so only explicitly‑approved videos are ever reachable |
+| **Access Safety Net** | Optional `limit_to_tag` so public tag shares only surface explicitly‑approved videos |
 | **View Tracking** | Anonymous view counting for basic analytics |
 | **Contact / Takedown Form** | Built‑in DMCA‑style request form that emails you |
 
@@ -112,7 +112,7 @@ stash:
   server_ip: "127.0.0.1"
   port: 9999
   api_key: "your_stash_api_key"
-  # limit_to_tag: 10844   # Optional: only videos that ALSO have this tag are shareable/viewable
+  # limit_to_tag: 10844   # Optional: public tag shares only surface videos that ALSO carry this tag; password-protected shares bypass it
 
 # Social‑embed (og:video) policy for link previews
 embed:
@@ -207,11 +207,24 @@ All media (previews, full video, thumbnails, HLS segments) is **proxied from the
 
 - **JWT Authentication**: secure admin access
 - **Capability URLs**: shares are reached via unguessable tokens (or your chosen custom slug), never by raw source IDs
-- **`limit_to_tag`**: when set, *every* access path (page, stream, preview, thumbnail) verifies the video also carries your approved tag — so un‑approved items can't be reached even by guessing
+- **`limit_to_tag`**: when set, **public** tag shares only ever surface videos that also carry your approved tag — across the gallery, streams, previews, and thumbnails. Password‑protected shares deliberately bypass this filter (see [`limit_to_tag` and password protection](#limit_to_tag-and-password-protection))
 - **Password Protection**: optional per‑share passwords, enforced on both pages and media via a signed unlock cookie
 - **Auto‑Expiration**: links expire on schedule
 - **Credential Protection**: your source server's API key stays server‑side
 - **Anonymous Tracking**: no personal data collected
+
+### `limit_to_tag` and password protection
+
+When `limit_to_tag` is set, Sharestream treats that tag as a **public‑content boundary**, and a tag share's password decides whether the boundary applies:
+
+- **Public tag shares (no password) are limited to the approved tag.** Their gallery, thumbnails, previews, and streams only ever surface videos carrying *both* the share's tag *and* `limit_to_tag`. The home page and the `/gallery/tag/{name}` view (which list only public shares) are limited the same way.
+- **Password‑protected tag shares bypass the filter.** A vetted, password‑gated share reaches the tag's full contents — so you can publish a curated subset publicly (by tagging it with `limit_to_tag`) while sharing the complete tag privately behind a password.
+
+The mental model: `limit_to_tag` is your curation boundary for the public web; a password is a deliberate, vetted escape hatch from it.
+
+> **Notes**
+> - Individual (single‑video) shares are unaffected by `limit_to_tag` either way — they point at a specific video you selected in the admin panel and are gated only by their capability URL and optional password.
+> - Removing the password from a tag share re‑applies the filter immediately, which can hide videos that were previously visible through it.
 
 ## Customization
 
@@ -263,7 +276,7 @@ Those are served live (no restart needed) — hard‑refresh and purge your CDN.
 - **Smart social embeds**: animated WebP / JPEG content negotiation, Mastodon `/embed` player, configurable preview‑vs‑full policy
 - **Date‑based default sorting** (release date, falling back to date added)
 - **Drop‑in branding**: SVG logo, generated/overridable favicon, per‑slot custom fonts
-- **`limit_to_tag`** safety enforced on every access path
+- **`limit_to_tag`** safety enforced on every public tag‑share access path (password‑protected shares bypass it)
 
 ## Contributing
 

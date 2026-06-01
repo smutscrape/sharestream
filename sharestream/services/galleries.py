@@ -232,15 +232,22 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
     videos = []
     total_count = 0
 
+    # A password-protected tag share is a vetted, gated view, so it shows the
+    # tag's full contents; a public share stays limited to limit_to_tag.
+    respect_limit = tag_share.password_hash is None
+
     if sort == 'random':
         # Let Stash handle random sort, paginating via Stash.
-        _, total_count = await get_videos_by_tag(tag_share.stash_tag_id, per_page=1)  # get total count
-        videos, _ = await get_videos_by_tag(tag_share.stash_tag_id, page=page, per_page=per_page, sort_by='random')
+        _, total_count = await get_videos_by_tag(tag_share.stash_tag_id, per_page=1,
+                                                 respect_limit_tag=respect_limit)  # get total count
+        videos, _ = await get_videos_by_tag(tag_share.stash_tag_id, page=page, per_page=per_page,
+                                            sort_by='random', respect_limit_tag=respect_limit)
     else:
         # Fetch all, then sort in Python and paginate. This keeps Title a
         # normal A→Z sort and Date a release-date sort (with a created_at
         # fallback) — consistent with the home page.
-        all_videos_raw = await get_all_videos_by_tag(tag_share.stash_tag_id)
+        all_videos_raw = await get_all_videos_by_tag(tag_share.stash_tag_id,
+                                                     respect_limit_tag=respect_limit)
         if sort == 'hits':
             for video_raw in all_videos_raw:
                 hit_record = db.query(TagVideoHit).filter(

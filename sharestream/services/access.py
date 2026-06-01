@@ -177,7 +177,11 @@ async def authorize_media(request: Request, resolved) -> None:
         raise HTTPException(status_code=403, detail="Password required")
 
     if resolved.is_tag_video:
-        if not await is_video_in_tag(resolved.stash_tag_id, resolved.stash_video_id):
+        # Password-protected tag shares bypass the limit_to_tag filter (vetted
+        # recipient), so membership is checked against the tag's full contents.
+        respect_limit = resolved.password_hash is None
+        if not await is_video_in_tag(resolved.stash_tag_id, resolved.stash_video_id,
+                                     respect_limit_tag=respect_limit):
             raise HTTPException(status_code=404, detail="Video not found in this tag")
 
 
@@ -193,7 +197,10 @@ async def authorize_tag_video(request: Request, db: Session, share_id: str, vide
     ensure_not_expired(tag_share.expires_at, "Tag share has expired")
     if not media_access_ok(request, share_id, tag_share.password_hash):
         raise HTTPException(status_code=403, detail="Password required")
-    if not await is_video_in_tag(tag_share.stash_tag_id, video_id):
+    # Password-protected shares are vetted, so they see the tag's full contents;
+    # public shares stay limited to limit_to_tag.
+    respect_limit = tag_share.password_hash is None
+    if not await is_video_in_tag(tag_share.stash_tag_id, video_id, respect_limit_tag=respect_limit):
         raise HTTPException(status_code=404, detail="Video not found in this tag")
     return tag_share
 

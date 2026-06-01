@@ -36,7 +36,7 @@ stash:
   server_ip: 127.0.0.1
   port: 5588
   api_key: yourStashAPIKeyGoesHere
-  # limit_to_tag: 10844 # Optional: If set, only include videos that have BOTH the shared tag and this tag (by tag ID)
+  # limit_to_tag: 10844 # Optional: public tag shares only include videos with BOTH the shared tag and this tag (by ID); password-protected shares bypass this filter
 
 # Social-embed (og:video) policy for link previews on Lemmy/Mastodon/etc.
 # mode: preview | full | dynamic   (can be overridden per-share in the admin panel)

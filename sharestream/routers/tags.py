@@ -231,8 +231,10 @@ async def tag_video_page(share_id: str, video_id: int, request: Request = None,
         return locked
 
     # Verify membership via the cached tag->video-id set instead of pulling the
-    # whole tag's scene list just to locate one video.
-    if not await is_video_in_tag(tag_share.stash_tag_id, video_id):
+    # whole tag's scene list just to locate one video. A password-protected tag
+    # share bypasses limit_to_tag (vetted recipient); a public one stays limited.
+    if not await is_video_in_tag(tag_share.stash_tag_id, video_id,
+                                 respect_limit_tag=(tag_share.password_hash is None)):
         raise HTTPException(status_code=404, detail="Video not found in this tag")
 
     # Track hits for this video
