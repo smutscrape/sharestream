@@ -53,8 +53,7 @@ async def get_tag_video_thumbnail(share_id: str, video_id: int, request: Request
     # Enforce expiry / password / tag membership before serving the cached
     # screenshot straight from the private cache (NOT a redirect to a public
     # /static URL, which would sidestep this gate).
-    with SessionLocal() as db:
-        await access.authorize_tag_video(request, db, share_id, video_id)
+    await access.authorize_tag_video(request, share_id, video_id)
     thumbnail_path = await fetch_and_cache_tag_video_thumbnail(share_id, video_id)
     if thumbnail_path:
         return FileResponse(thumbnail_path, media_type="image/jpeg",
@@ -137,9 +136,8 @@ async def proxy_hls_segment(share_id: str, segment: str, request: Request = None
 @router.get("/tag/{share_id}/video/{video_id}/stream.m3u8")
 async def serve_tag_video_m3u8(share_id: str, video_id: int, request: Request = None):
     try:
-        with SessionLocal() as db:
-            tag_share = await access.authorize_tag_video(request, db, share_id, video_id)
-            resolution = tag_share.resolution
+        tag_share = await access.authorize_tag_video(request, share_id, video_id)
+        resolution = tag_share.resolution
 
         composite_id = f"tag-{share_id}-video-{video_id}"
         m3u8_path = SHARES_DIR / f"{composite_id}.m3u8"
@@ -162,10 +160,8 @@ async def proxy_tag_video_segment(share_id: str, video_id: int, segment: str, re
     try:
         if request is not None:
             logger.debug(f"{request.client.host} requested segment {segment} for tag video {share_id}/{video_id}")
-        with SessionLocal() as db:
-            tag_share = await access.authorize_tag_video(request, db, share_id, video_id)
-            resolution = tag_share.resolution
-        return await media_proxy.stream_segment(video_id, segment, resolution)
+        tag_share = await access.authorize_tag_video(request, share_id, video_id)
+        return await media_proxy.stream_segment(video_id, segment, tag_share.resolution)
     except HTTPException:
         raise
     except Exception as e:
@@ -186,8 +182,7 @@ async def proxy_video_preview(share_id: str, request: Request = None):
 
 @router.get("/tag/{share_id}/video/{video_id}/preview")
 async def proxy_tag_video_preview(share_id: str, video_id: int, request: Request = None):
-    with SessionLocal() as db:
-        await access.authorize_tag_video(request, db, share_id, video_id)
+    await access.authorize_tag_video(request, share_id, video_id)
     return await media_proxy.stream_simple_preview(video_id)
 
 
@@ -206,8 +201,7 @@ async def serve_mp4_preview(share_id: str, request: Request):
 
 @router.api_route("/tag/{share_id}/video/{video_id}/stream.mp4", methods=["GET", "HEAD"])
 async def serve_tag_video_mp4(share_id: str, video_id: int, request: Request):
-    with SessionLocal() as db:
-        await access.authorize_tag_video(request, db, share_id, video_id)
+    await access.authorize_tag_video(request, share_id, video_id)
     return await media_proxy.proxy_preview(video_id, request)
 
 
@@ -252,14 +246,12 @@ async def serve_share_thumb(share_id: str, request: Request):
 @router.api_route("/tag/{share_id}/video/{video_id}/thumb", methods=["GET", "HEAD"])
 async def serve_tag_video_thumb(share_id: str, video_id: int, request: Request):
     """Social-embed thumbnail for a video within a tag share."""
-    with SessionLocal() as db:
-        await access.authorize_tag_video(request, db, share_id, video_id)
+    await access.authorize_tag_video(request, share_id, video_id)
     return await media_proxy.proxy_thumb(video_id, request)
 
 
 @router.api_route("/tag/{share_id}/video/{video_id}/webp", methods=["GET", "HEAD"])
 async def serve_tag_video_webp(share_id: str, video_id: int, request: Request):
     """Animated WebP preview for a video within a tag share."""
-    with SessionLocal() as db:
-        await access.authorize_tag_video(request, db, share_id, video_id)
+    await access.authorize_tag_video(request, share_id, video_id)
     return await media_proxy.proxy_webp(video_id, request)

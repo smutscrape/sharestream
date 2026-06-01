@@ -22,6 +22,7 @@ from sharestream.config import SECRET_KEY
 from sharestream.core.security import pwd_context
 from sharestream.core.templates import render
 from sharestream.db.models import SharedTag, SharedVideo
+from sharestream.db.session import SessionLocal
 from sharestream.services.cache import is_video_in_tag
 
 
@@ -185,22 +186,38 @@ async def authorize_media(request: Request, resolved) -> None:
             raise HTTPException(status_code=404, detail="Video not found in this tag")
 
 
-async def authorize_tag_video(request: Request, db: Session, share_id: str, video_id: int) -> SharedTag:
+async def authorize_tag_video(request: Request, share_id: str, video_id: int) -> SharedTag:
     """Gate a media sub-request for a specific video within a tag share.
 
     Looks up the tag share, enforces expiry + password + tag membership, and
     returns the SharedTag. Raises the same HTTPExceptions as the original routes.
+
+    Owns a short-lived session for the lookup and CLOSES it before the
+    (network-bound, potentially slow) membership check, so a DB connection is
+    never held across that ``await``. Otherwise a burst of media sub-requests —
+    e.g. a gallery rendering dozens of tag-video thumbnails at once — would each
+    pin a connection while awaiting the single coalesced membership fetch and
+    exhaust the pool (the membership fetch can list an entire large tag).
     """
-    tag_share = db.query(SharedTag).filter(SharedTag.share_id == share_id).first()
-    if not tag_share:
-        raise HTTPException(status_code=404, detail="Tag share not found")
-    ensure_not_expired(tag_share.expires_at, "Tag share has expired")
-    if not media_access_ok(request, share_id, tag_share.password_hash):
+    with SessionLocal() as db:
+        tag_share = db.query(SharedTag).filter(SharedTag.share_id == share_id).first()
+        if not tag_share:
+            raise HTTPException(status_code=404, detail="Tag share not found")
+        # Capture the plain values the post-close checks need; the detached
+        # instance keeps its already-loaded columns (resolution, etc.) for the
+        # caller, but we read these here so nothing lazy-loads after close.
+        password_hash = tag_share.password_hash
+        stash_tag_id = tag_share.stash_tag_id
+        expires_at = tag_share.expires_at
+        db.expunge(tag_share)
+    # ---- session released; no DB connection held past this point ----
+    ensure_not_expired(expires_at, "Tag share has expired")
+    if not media_access_ok(request, share_id, password_hash):
         raise HTTPException(status_code=403, detail="Password required")
     # Password-protected shares are vetted, so they see the tag's full contents;
     # public shares stay limited to limit_to_tag.
-    respect_limit = tag_share.password_hash is None
-    if not await is_video_in_tag(tag_share.stash_tag_id, video_id, respect_limit_tag=respect_limit):
+    respect_limit = password_hash is None
+    if not await is_video_in_tag(stash_tag_id, video_id, respect_limit_tag=respect_limit):
         raise HTTPException(status_code=404, detail="Video not found in this tag")
     return tag_share
 

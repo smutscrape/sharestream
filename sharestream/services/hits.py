@@ -39,6 +39,21 @@ def get_tag_video_hit(db: Session, tag_share_id: str, video_id: int) -> TagVideo
     ).first()
 
 
+def get_tag_video_hits_map(db: Session, tag_share_id: str) -> dict[int, int]:
+    """Return {video_id: hits} for every tracked video in a tag share, in ONE query.
+
+    Gallery builders need a hit count per card. Doing that per-video is a classic
+    N+1 — for a hits-sorted view of a large tag it was one SELECT *per scene in
+    the whole tag* (thousands of round-trips). Only videos that have actually been
+    viewed have a row, so this result is small (<= number of videos ever opened),
+    and missing ids simply default to 0 at the call site.
+    """
+    rows = db.query(TagVideoHit.video_id, TagVideoHit.hits).filter(
+        TagVideoHit.tag_share_id == tag_share_id
+    ).all()
+    return {video_id: hits for video_id, hits in rows}
+
+
 def increment_share_hit(db: Session, video: SharedVideo) -> int:
     """Count a view of an individual share and return the new total.
 

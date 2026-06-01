@@ -307,6 +307,116 @@ async def get_all_videos_by_tag(tag_id: str, respect_limit_tag: bool = True) -> 
     return all_videos
 
 
+async def get_tag_scene_ids(tag_id: str, respect_limit_tag: bool = True) -> set[int]:
+    """Return just the set of scene IDs in a tag (id-only GraphQL), paginated.
+
+    Far cheaper than :func:`get_all_videos_by_tag`, which pulls full scene
+    objects (title, tags, performers, files, …) for every scene. Membership
+    checks only need IDs, so this is what the membership cache uses — an 11k-scene
+    tag is a few small pages instead of a multi-megabyte payload.
+    ``respect_limit_tag`` mirrors :func:`get_videos_by_tag`.
+    """
+    apply_limit = bool(LIMIT_TO_TAG) and respect_limit_tag
+    tag_values = [str(tag_id)]
+    if apply_limit:
+        tag_values = [str(LIMIT_TO_TAG), str(tag_id)]
+    query_str = """
+        query FindScenes($filter: FindFilterType, $scene_filter: SceneFilterType) {
+            findScenes(filter: $filter, scene_filter: $scene_filter) {
+                count
+                scenes { id }
+            }
+        }
+    """
+    ids: set[int] = set()
+    page = 1
+    per_page = 5000
+    while True:
+        query = {
+            "operationName": "FindScenes",
+            "variables": {
+                "filter": {"q": "", "page": page, "per_page": per_page, "sort": "id", "direction": "ASC"},
+                "scene_filter": {
+                    "tags": {
+                        "value": tag_values,
+                        "excludes": [],
+                        "modifier": "INCLUDES_ALL",
+                        "depth": 0 if apply_limit else -1,
+                    }
+                },
+            },
+            "query": query_str,
+        }
+        try:
+            response = await http_client.post(GRAPHQL_URL, json=query, headers=_graphql_headers())
+            response.raise_for_status()
+            data = response.json()
+            if data.get("errors"):
+                logger.error(f"GraphQL error getting scene ids for tag {tag_id}: {data['errors']}")
+                break
+            result = data.get("data", {}).get("findScenes", {})
+            scenes = result.get("scenes", [])
+            total_count = result.get("count", 0)
+            if not scenes:
+                break
+            ids.update(int(s["id"]) for s in scenes)
+            if len(ids) >= total_count or total_count == 0:
+                break
+            page += 1
+        except Exception as e:
+            logger.error(f"Error getting scene ids for tag {tag_id}: {e}")
+            break
+    logger.info(f"Fetched {len(ids)} scene ids for tag_id {tag_id} (respect_limit_tag={respect_limit_tag})")
+    return ids
+
+
+async def tag_contains_scene(tag_id: str, video_id: int, respect_limit_tag: bool = True) -> bool | None:
+    """Cheap single-scene membership probe: does scene ``video_id`` carry ``tag_id``
+    (and ``limit_to_tag`` when respected)?
+
+    Returns True/False, or ``None`` on any upstream error/uncertainty so callers
+    can fall back to the full id set. This lets a lone media hit (e.g. a direct
+    tag-video link or a social-embed crawler) verify membership with one tiny,
+    indexed Stash query instead of listing the entire tag.
+    """
+    apply_limit = bool(LIMIT_TO_TAG) and respect_limit_tag
+    tag_values = [str(tag_id)]
+    if apply_limit:
+        tag_values = [str(LIMIT_TO_TAG), str(tag_id)]
+    query = {
+        "operationName": "FindScenes",
+        "variables": {
+            "filter": {"page": 1, "per_page": 1},
+            "scene_filter": {
+                "id": {"modifier": "EQUALS", "value": int(video_id)},
+                "tags": {
+                    "value": tag_values,
+                    "excludes": [],
+                    "modifier": "INCLUDES_ALL",
+                    "depth": 0 if apply_limit else -1,
+                },
+            },
+        },
+        "query": """
+            query FindScenes($filter: FindFilterType, $scene_filter: SceneFilterType) {
+                findScenes(filter: $filter, scene_filter: $scene_filter) { count }
+            }
+        """,
+    }
+    try:
+        response = await http_client.post(GRAPHQL_URL, json=query, headers=_graphql_headers())
+        response.raise_for_status()
+        data = response.json()
+        if data.get("errors"):
+            logger.error(f"GraphQL error probing scene {video_id} in tag {tag_id}: {data['errors']}")
+            return None
+        count = data.get("data", {}).get("findScenes", {}).get("count", 0)
+        return count > 0
+    except Exception as e:
+        logger.error(f"Error probing scene {video_id} in tag {tag_id}: {e}")
+        return None
+
+
 async def get_videos_by_tag_name(tag_name: str, page: int = 1, per_page: int = 1000) -> tuple[list, dict | None]:
     """Get videos by tag name - returns (videos, tag_info)"""
     logger.debug(f"Getting videos by tag name: {tag_name}")

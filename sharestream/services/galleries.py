@@ -24,13 +24,37 @@ from sharestream.backends.stash import (
 )
 from sharestream.config import CONTENT_WARNING
 from sharestream.core.branding import site_context
-from sharestream.db.models import SharedTag, SharedVideo, TagVideoHit
+from sharestream.db.models import SharedTag, SharedVideo
+from sharestream.services.cache import prime_tag_membership
+from sharestream.services.hits import get_tag_video_hits_map
 from sharestream.services.thumbnails import (
     fetch_and_cache_tag_video_thumbnail,
     fetch_and_cache_thumbnail,
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def _warm_thumbnails(coros, concurrency: int = 8) -> None:
+    """Pre-warm on-disk thumbnail caches concurrently, with bounded fan-out.
+
+    Galleries used to ``await`` each screenshot fetch one-by-one, so warming a
+    screenful cost N sequential Stash round-trips before the page could render.
+    Running them together (capped, so we don't open dozens of simultaneous Stash
+    connections) collapses that to roughly ceil(N/concurrency) round-trips.
+    Per-item errors are swallowed: a missing screenshot must not break the page —
+    the gated thumbnail route falls back to the placeholder on its own.
+    """
+    sem = asyncio.Semaphore(concurrency)
+
+    async def run(coro):
+        async with sem:
+            try:
+                await coro
+            except Exception:
+                pass
+
+    await asyncio.gather(*(run(c) for c in coros))
 
 
 def effective_sort_date(date, created_at):
@@ -86,6 +110,9 @@ async def build_home_context(db: Session, request, sort: str = 'date') -> dict:
     # results are zipped back in tag order, so card order / dedup is unchanged.
     all_tag_videos = {}  # {video_id: video_info}
     tag_cards = []
+    warm_coros = []  # thumbnails to pre-warm concurrently once the page is assembled
+    # One batched hit-count lookup per gallery tag (was an N+1 over every video).
+    hits_by_tag = {tag.share_id: get_tag_video_hits_map(db, tag.share_id) for tag in tag_shares}
     tag_video_results = await asyncio.gather(
         *(get_videos_by_tag(tag.stash_tag_id) for tag in tag_shares)
     ) if tag_shares else []
@@ -93,9 +120,10 @@ async def build_home_context(db: Session, request, sort: str = 'date') -> dict:
         # Create tag cards for collections display
         if tag_videos:
             first_video = tag_videos[0]
-            # Warm the cache, then expose the access-gated route URL (never a
-            # raw /static path). These tags are public, so the gate is a no-op.
-            await fetch_and_cache_tag_video_thumbnail(tag.share_id, int(first_video["id"]))
+            # Expose the access-gated route URL (never a raw /static path) and
+            # queue its screenshot for concurrent warming. These tags are public,
+            # so the gate is a no-op.
+            warm_coros.append(fetch_and_cache_tag_video_thumbnail(tag.share_id, int(first_video["id"])))
             thumbnail_url = f"/tag/{tag.share_id}/thumbnail/{first_video['id']}"
             # A random sample of animated-WebP preview URLs from videos in
             # this tag, for the cycling animated collection card on the home
@@ -153,11 +181,6 @@ async def build_home_context(db: Session, request, sort: str = 'date') -> dict:
             video_data = video_info["video"]
             tag_share_id = video_info["tag_share_id"]
 
-            hit_record = db.query(TagVideoHit).filter(
-                TagVideoHit.tag_share_id == tag_share_id,
-                TagVideoHit.video_id == video_id
-            ).first()
-
             all_video_cards.append({
                 "share_id": f"tag-{tag_share_id}-video-{video_id}",
                 "video_name": video_data["title"],
@@ -165,7 +188,7 @@ async def build_home_context(db: Session, request, sort: str = 'date') -> dict:
                 "preview_url": f"/tag/{tag_share_id}/video/{video_id}/webp",
                 "thumbnail_url": None,  # Will be lazy loaded
                 "lazy_thumbnail_url": f"/tag/{tag_share_id}/thumbnail/{video_id}",
-                "hits": hit_record.hits if hit_record else 0,
+                "hits": hits_by_tag.get(tag_share_id, {}).get(video_id, 0),
                 "stash_video_id": video_id,
                 "rating": video_data.get("rating", 0) or 0,
                 "sort_date": effective_sort_date(video_data.get("date"), video_data.get("created_at"))
@@ -185,7 +208,8 @@ async def build_home_context(db: Session, request, sort: str = 'date') -> dict:
 
     # Pre-warm the on-disk cache for the first batch of sorted videos so they
     # paint instantly, but always point the <img> at the access-gated route
-    # URL (never a raw /static path).
+    # URL (never a raw /static path). Warming is queued and run concurrently
+    # (below) so the page isn't gated on a serial chain of Stash fetches.
     for i, card in enumerate(all_video_cards):
         if i >= 24:  # Number of thumbnails to preload
             break
@@ -193,11 +217,13 @@ async def build_home_context(db: Session, request, sort: str = 'date') -> dict:
             parts = card['share_id'].split('-video-')
             tag_share_id = parts[0][4:]
             video_id = int(parts[1])
-            await fetch_and_cache_tag_video_thumbnail(tag_share_id, video_id)
+            warm_coros.append(fetch_and_cache_tag_video_thumbnail(tag_share_id, video_id))
             card['thumbnail_url'] = f"/tag/{tag_share_id}/thumbnail/{video_id}"
         else:
-            await fetch_and_cache_thumbnail(card['share_id'], card['stash_video_id'])
+            warm_coros.append(fetch_and_cache_thumbnail(card['share_id'], card['stash_video_id']))
             card['thumbnail_url'] = f"/share/{card['share_id']}/thumbnail.jpg"
+
+    await _warm_thumbnails(warm_coros)
 
     # Log final counts for debugging
     logger.info(f"Home page rendering: {len(tag_cards)} tag collections, {len(all_video_cards)} total videos")
@@ -236,6 +262,10 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
     # tag's full contents; a public share stays limited to limit_to_tag.
     respect_limit = tag_share.password_hash is None
 
+    # One batched hit-count lookup for the whole tag share (was an N+1: one query
+    # per card, or — for hits sort — one query per scene in the entire tag).
+    hits_map = get_tag_video_hits_map(db, share_id)
+
     if sort == 'random':
         # Let Stash handle random sort, paginating via Stash.
         _, total_count = await get_videos_by_tag(tag_share.stash_tag_id, per_page=1,
@@ -248,13 +278,15 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
         # fallback) — consistent with the home page.
         all_videos_raw = await get_all_videos_by_tag(tag_share.stash_tag_id,
                                                      respect_limit_tag=respect_limit)
+        # We just fetched the tag's COMPLETE contents — seed the membership cache
+        # so this page's own (access-gated) thumbnail sub-requests hit it warm
+        # instead of each re-probing Stash.
+        prime_tag_membership(tag_share.stash_tag_id,
+                             (int(v["id"]) for v in all_videos_raw),
+                             respect_limit_tag=respect_limit)
         if sort == 'hits':
             for video_raw in all_videos_raw:
-                hit_record = db.query(TagVideoHit).filter(
-                    TagVideoHit.tag_share_id == share_id,
-                    TagVideoHit.video_id == int(video_raw["id"])
-                ).first()
-                video_raw['hits'] = hit_record.hits if hit_record else 0
+                video_raw['hits'] = hits_map.get(int(video_raw["id"]), 0)
         sort_video_dicts(all_videos_raw, sort)
         total_count = len(all_videos_raw)
         start = (page - 1) * per_page
@@ -264,25 +296,17 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
     total_pages = (total_count + per_page - 1) // per_page  # Ceiling division
     has_more_pages = page < total_pages
 
-    # Transform videos for gallery display with proxied thumbnails
+    # Transform videos for gallery display with proxied thumbnails. Warm the
+    # first 20 screenshots concurrently (the rest lazy-load); either way the URL
+    # is the access-gated route (so a protected tag's thumbnails stay behind its
+    # password), never /static.
     video_cards = []
+    warm_coros = []
     for i, video in enumerate(videos):
-        # Get hit count for this video
-        hit_record = db.query(TagVideoHit).filter(
-            TagVideoHit.tag_share_id == share_id,
-            TagVideoHit.video_id == int(video["id"])
-        ).first()
-        hits = hit_record.hits if hit_record else 0
-
-        # Warm the cache for the first 20 so they paint instantly; the rest
-        # lazy-load. Either way the URL is the access-gated route (so a
-        # protected tag's thumbnails stay behind its password), never /static.
         thumb_route = f"/tag/{share_id}/thumbnail/{video['id']}"
-        if i < 20:
-            await fetch_and_cache_tag_video_thumbnail(share_id, int(video["id"]))
-            eager = True
-        else:
-            eager = False
+        eager = i < 20
+        if eager:
+            warm_coros.append(fetch_and_cache_tag_video_thumbnail(share_id, int(video["id"])))
 
         video_cards.append({
             "share_id": f"tag-{share_id}-video-{video['id']}",
@@ -291,8 +315,10 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
             "preview_url": f"/tag/{share_id}/video/{video['id']}/webp",
             "thumbnail_url": thumb_route if eager else "/static/default_thumbnail.jpg",
             "lazy_thumbnail_url": thumb_route if not eager else None,
-            "hits": hits
+            "hits": hits_map.get(int(video["id"]), 0)
         })
+
+    await _warm_thumbnails(warm_coros)
 
     context = site_context()
     context.update(
@@ -343,13 +369,14 @@ async def build_tag_name_gallery_context(db: Session, tag_name: str) -> dict:
 
     video_cards = []
     processed_video_ids = set()
+    warm_coros = []
 
     # 4. Process individual shares
     logger.info(f"Processing {len(individual_shares)} individual shares for tag '{tag_name}' gallery...")
     for video in individual_shares:
         if video.stash_video_id in target_video_ids and video.stash_video_id not in processed_video_ids:
             logger.debug(f"Found match in individual share: video_id={video.stash_video_id}")
-            await fetch_and_cache_thumbnail(video.share_id, video.stash_video_id)
+            warm_coros.append(fetch_and_cache_thumbnail(video.share_id, video.stash_video_id))
             video_cards.append({
                 "share_url": f"/{video.share_id}",
                 "preview_url": f"/share/{video.share_id}/webp",
@@ -363,6 +390,8 @@ async def build_tag_name_gallery_context(db: Session, tag_name: str) -> dict:
     # 5. Process tag shares. Fetch each tag share's scenes concurrently, then
     # process the results in original order (preserving dedup behavior).
     logger.info(f"Processing {len(tag_shares)} tag shares for tag '{tag_name}' gallery...")
+    # Batched hit lookups: one query per tag share instead of one per match.
+    hits_by_tag = {t.share_id: get_tag_video_hits_map(db, t.share_id) for t in tag_shares}
     tag_videos_lists = await asyncio.gather(
         *(get_all_videos_by_tag(t.stash_tag_id) for t in tag_shares)
     ) if tag_shares else []
@@ -376,11 +405,7 @@ async def build_tag_name_gallery_context(db: Session, tag_name: str) -> dict:
                 thumbnail_url = "/static/default_thumbnail.jpg"
                 lazy_thumbnail_url = f"/tag/{tag_share.share_id}/thumbnail/{video_id}"
 
-                hit_record = db.query(TagVideoHit).filter(
-                    TagVideoHit.tag_share_id == tag_share.share_id,
-                    TagVideoHit.video_id == video_id
-                ).first()
-                hits = hit_record.hits if hit_record else 0
+                hits = hits_by_tag.get(tag_share.share_id, {}).get(video_id, 0)
 
                 video_cards.append({
                     "share_url": f"/{tag_share.share_id}/{video_id}",
@@ -391,6 +416,8 @@ async def build_tag_name_gallery_context(db: Session, tag_name: str) -> dict:
                     "hits": hits,
                 })
                 processed_video_ids.add(video_id)
+
+    await _warm_thumbnails(warm_coros)
 
     # Sort video cards by name
     video_cards.sort(key=lambda x: x['video_name'])
