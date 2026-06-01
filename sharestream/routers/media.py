@@ -48,7 +48,8 @@ _M3U8_HEADERS = {
 # Cached screenshot routes (served through the access gate)
 # ------------------------------------------------------------------
 @router.get("/tag/{share_id}/thumbnail/{video_id}")
-async def get_tag_video_thumbnail(share_id: str, video_id: int, request: Request = None):
+async def get_tag_video_thumbnail(share_id: str, video_id: int, request: Request = None,
+                                  placeholder: bool = True):
     # Enforce expiry / password / tag membership before serving the cached
     # screenshot straight from the private cache (NOT a redirect to a public
     # /static URL, which would sidestep this gate).
@@ -58,13 +59,17 @@ async def get_tag_video_thumbnail(share_id: str, video_id: int, request: Request
     if thumbnail_path:
         return FileResponse(thumbnail_path, media_type="image/jpeg",
                             headers={"Cache-Control": "private, max-age=300"})
-    # Fall back to the generic placeholder (not protected content) if the
-    # upstream screenshot fetch failed.
+    # When the upstream screenshot fetch fails, gallery callers want the generic
+    # placeholder; the video player passes ?placeholder=false so a failed poster
+    # just leaves the player black instead of flashing "No preview available".
+    if not placeholder:
+        raise HTTPException(status_code=404, detail="No thumbnail available")
     return RedirectResponse(url="/static/default_thumbnail.jpg", status_code=302)
 
 
 @router.get("/share/{share_id}/thumbnail.jpg")
-async def serve_share_thumbnail(share_id: str, request: Request = None):
+async def serve_share_thumbnail(share_id: str, request: Request = None,
+                                placeholder: bool = True):
     # Cached screenshot for an individual share, served through the access gate so
     # a password-protected share's thumbnail can't be fetched by guessing a
     # static URL.
@@ -75,6 +80,11 @@ async def serve_share_thumbnail(share_id: str, request: Request = None):
     if thumbnail_path:
         return FileResponse(thumbnail_path, media_type="image/jpeg",
                             headers={"Cache-Control": "private, max-age=300"})
+    # See get_tag_video_thumbnail: the player passes ?placeholder=false so a
+    # missing screenshot leaves the player black rather than showing the
+    # "No preview available" placeholder.
+    if not placeholder:
+        raise HTTPException(status_code=404, detail="No thumbnail available")
     return RedirectResponse(url="/static/default_thumbnail.jpg", status_code=302)
 
 

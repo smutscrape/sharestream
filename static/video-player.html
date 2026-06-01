@@ -14,10 +14,15 @@
         {% set page_url  = base_domain + '/' + tag_share_id + '/' + video_id %}
         {% set video_url = base_domain + '/tag/' + tag_share_id + '/video/' + video_id + '/stream.mp4' %}
         {% set image_url = base_domain + '/tag/' + tag_share_id + '/video/' + video_id + '/thumb' %}
+        {# Poster = the real Stash screenshot; ?placeholder=false makes a missing
+           one 404 so the player stays black instead of showing the gallery
+           "No preview available" tile. #}
+        {% set poster_url = '/tag/' + tag_share_id + '/thumbnail/' + video_id + '?placeholder=false' %}
     {% else %}
         {% set page_url  = base_domain + '/' + share_id %}
         {% set video_url = base_domain + '/share/' + share_id + '/stream.mp4' %}
         {% set image_url = base_domain + '/share/' + share_id + '/thumb' %}
+        {% set poster_url = '/share/' + share_id + '/thumbnail.jpg?placeholder=false' %}
     {% endif %}
 
     {# The server resolves whether to embed the full video or the preview clip
@@ -82,6 +87,7 @@
     <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
     <link href="/static/video-player.css" rel="stylesheet">
     <script src="/static/emoji-fix.js" defer></script>
+    <script src="/static/metadata-masonry.js" defer></script>
 </head>
 <body>
     <div class="container">
@@ -93,7 +99,7 @@
         {% endif %}
         <div class="video-stage">
         <div class="video-container" id="video-box" data-arw="{{ og_w }}" data-arh="{{ og_h }}">
-            <video id="video-player" class="video-js vjs-default-skin" controls preload="auto" poster="/static/default_thumbnail.jpg" playsinline loop>
+            <video id="video-player" class="video-js vjs-default-skin" controls preload="auto" poster="{{ poster_url }}" playsinline loop>
                 <source src="/share/{{ share_id }}/stream.m3u8" type="application/x-mpegURL">
                 Your browser does not support the video tag.
             </video>
@@ -194,7 +200,7 @@
                     <h3>Studio</h3>
                     <div class="metadata-item">
                         {% if video_details.studio.url %}
-                        <a href="{{ video_details.studio.url }}" target="_blank" rel="noopener noreferrer">{{ video_details.studio.name }}</a>
+                        <a href="{{ video_details.studio.url }}" target="_blank" rel="noopener noreferrer" class="external-link">{{ video_details.studio.name }}</a>
                         {% else %}
                         <span>{{ video_details.studio.name }}</span>
                         {% endif %}

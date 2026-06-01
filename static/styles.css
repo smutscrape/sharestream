@@ -918,11 +918,9 @@ td a:hover {
     word-break: break-word;
 }
 
-/* Description spans the full width of the metadata grid; the shared
+/* Description stays a direct child of .metadata-grid (above the masonry
+   columns), so as a block it already spans the full width; the shared
    .metadata-section rules provide its padding / background / border. */
-.video-description {
-    grid-column: 1 / -1;
-}
 
 .video-description h3 {
     margin-bottom: 10px;
@@ -935,14 +933,35 @@ td a:hover {
     color: #c8b3d4;
 }
 
-.metadata-grid {
-    display: grid;
-    /* Pack as many boxes per row as fit; each box only needs a small minimum,
-       so Statistics, Tags, etc. sit side by side whenever there is room and
-       stack automatically when the column is narrow. */
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+/* True masonry layout. metadata-masonry.js distributes the .metadata-section
+   boxes into .metadata-col columns, dropping each box into the currently
+   shortest column so a short box (e.g. Details) rises to fill the vertical gap
+   a taller neighbour (e.g. Tags) would otherwise leave under it. A plain CSS
+   grid keeps rows aligned (leaving the gap), and CSS multi-column is
+   column-major (it can't lift a later box into an earlier column), so neither
+   gives this. Before/without JS the boxes just stack vertically, which is fine.
+
+   The `>` selector supplies the inter-box gap ONLY while the boxes are direct
+   children of .metadata-grid (the no-JS stack, and the full-width Description
+   which the script leaves in place above the columns). Once the script moves a
+   box into a .metadata-col it's no longer a direct child, so the column's own
+   `gap` spaces it instead. */
+.metadata-grid > .metadata-section {
+    margin-bottom: 20px;
+}
+
+.metadata-columns {
+    display: flex;
+    align-items: flex-start;
     gap: 20px;
-    align-items: start;
+}
+
+.metadata-col {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
 }
 
 .metadata-section {
@@ -1051,8 +1070,8 @@ td a:hover {
         font-size: 1.5rem;
     }
 
-    /* Leave .metadata-grid to its auto-fit packing so boxes still pair up
-       whenever the column is wide enough. */
+    /* metadata-masonry.js derives the column count from the available width, so
+       it collapses to a single column on narrow screens on its own. */
     
     .performer-links {
         flex-direction: column;
