@@ -53,7 +53,7 @@
         <!-- Separator -->
         <div class="section-separator">
             <div class="separator-line"></div>
-            <span class="separator-text">All Videos</span>
+            <span class="separator-text">All Videos{% if total_videos %} ({{ total_videos_label }} total){% endif %}</span>
             <div class="separator-line"></div>
         </div>
         {% endif %}
@@ -96,6 +96,18 @@
             {% endfor %}
         </div>
         
+        {% if current_page %}
+        <div class="pagination">
+            {% if has_prev_page %}
+            <a href="{{ prev_page_url }}">← Previous</a>
+            {% endif %}
+            <span class="current">Page {{ current_page }}</span>
+            {% if has_next_page %}
+            <a href="{{ next_page_url }}">Next →</a>
+            {% endif %}
+        </div>
+        {% endif %}
+        
         {% if social_links %}
         <div class="social-links">
             {% for link in social_links %}
@@ -136,6 +148,10 @@
                 sortSelect.addEventListener('change', function() {
                     const url = new URL(window.location.href);
                     url.searchParams.set('sort', this.value);
+                    // Reset to page 1 when sort order changes
+                    if (url.searchParams.has('page')) {
+                        url.searchParams.set('page', '1');
+                    }
                     window.location.href = url.toString();
                 });
             }

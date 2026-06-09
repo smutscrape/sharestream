@@ -34,6 +34,33 @@ from sharestream.services.thumbnails import (
 
 logger = logging.getLogger(__name__)
 
+# How many video cards a single gallery view (home page, tag gallery page)
+# shows. The tag gallery paginates at this size; the home page shows this many
+# as a teaser of the full library (the real total is shown in the header).
+GALLERY_PAGE_SIZE = 24
+
+
+def format_count(n: int) -> str:
+    """Human-friendly count for headers: plain up to 1000, then 1-decimal 'k'.
+
+    e.g. 305 -> '305', 1000 -> '1000', 5341 -> '5.3k', 12000 -> '12k'.
+    """
+    n = int(n or 0)
+    if n > 1000:
+        s = f"{n / 1000:.1f}".rstrip('0').rstrip('.')
+        return f"{s}k"
+    return str(n)
+
+
+def _title_sort_key(title):
+    """Sort key for title/name ascending that pushes untitled videos to the END.
+
+    Returns (is_empty, lowercased_title) so titled videos sort A->Z first and
+    blank/whitespace-only titles fall last instead of clumping at the top.
+    """
+    t = (title or '').strip()
+    return (t == '', t.lower())
+
 
 async def _warm_thumbnails(coros, concurrency: int = 8) -> None:
     """Pre-warm on-disk thumbnail caches concurrently, with bounded fan-out.
@@ -70,7 +97,7 @@ def sort_video_dicts(items, sort):
     'random' -> shuffled.
     """
     if sort == 'title':
-        items.sort(key=lambda v: (v.get('title') or '').lower())
+        items.sort(key=lambda v: _title_sort_key(v.get('title')))
     elif sort == 'hits':
         items.sort(key=lambda v: v.get('hits') or 0, reverse=True)
     elif sort == 'rating':
@@ -81,8 +108,10 @@ def sort_video_dicts(items, sort):
         items.sort(key=lambda v: effective_sort_date(v.get('date'), v.get('created_at')), reverse=True)
 
 
-async def build_home_context(db: Session, request, sort: str = 'date') -> dict:
+async def build_home_context(db: Session, request, sort: str = 'date', page: int = 1) -> dict:
     """Assemble the home-page template context (collections + combined gallery)."""
+    if page < 1:
+        page = 1
     # Get current time for expiration check
     current_time = datetime.datetime.now(timezone.utc)
 
@@ -196,7 +225,7 @@ async def build_home_context(db: Session, request, sort: str = 'date') -> dict:
 
     # 4. Sort the combined list
     if sort == 'title':
-        all_video_cards.sort(key=lambda v: (v.get('video_name') or '').lower())
+        all_video_cards.sort(key=lambda v: _title_sort_key(v.get('video_name')))
     elif sort == 'hits':
         all_video_cards.sort(key=lambda v: v.get('hits') or 0, reverse=True)
     elif sort == 'rating':
@@ -206,13 +235,20 @@ async def build_home_context(db: Session, request, sort: str = 'date') -> dict:
     else:  # 'date' (default) — newest first by release date, else created_at
         all_video_cards.sort(key=lambda v: v.get('sort_date') or '', reverse=True)
 
-    # Pre-warm the on-disk cache for the first batch of sorted videos so they
-    # paint instantly, but always point the <img> at the access-gated route
-    # URL (never a raw /static path). Warming is queued and run concurrently
-    # (below) so the page isn't gated on a serial chain of Stash fetches.
-    for i, card in enumerate(all_video_cards):
-        if i >= 24:  # Number of thumbnails to preload
-            break
+    # Paginate the combined list the same way the tag galleries do: capture the
+    # full total (for the header) BEFORE slicing to the current page's worth.
+    per_page = GALLERY_PAGE_SIZE
+    total_videos = len(all_video_cards)
+    total_pages = (total_videos + per_page - 1) // per_page  # ceiling division
+    has_more_pages = page < total_pages
+    start = (page - 1) * per_page
+    all_video_cards = all_video_cards[start:start + per_page]
+
+    # Pre-warm the on-disk cache for the shown videos so they paint instantly,
+    # but always point the <img> at the access-gated route URL (never a raw
+    # /static path). Warming is queued and run concurrently (below) so the page
+    # isn't gated on a serial chain of Stash fetches.
+    for card in all_video_cards:
         if card['share_id'].startswith('tag-') and '-video-' in card['share_id']:
             parts = card['share_id'].split('-video-')
             tag_share_id = parts[0][4:]
@@ -226,7 +262,8 @@ async def build_home_context(db: Session, request, sort: str = 'date') -> dict:
     await _warm_thumbnails(warm_coros)
 
     # Log final counts for debugging
-    logger.info(f"Home page rendering: {len(tag_cards)} tag collections, {len(all_video_cards)} total videos")
+    logger.info(f"Home page rendering: {len(tag_cards)} tag collections, "
+                f"{len(all_video_cards)} of {total_videos} videos shown")
 
     # Show the content warning only when configured AND the visitor hasn't
     # already acknowledged it (cookie set client-side on "Enter").
@@ -238,6 +275,13 @@ async def build_home_context(db: Session, request, sort: str = 'date') -> dict:
     context.update(
         tag_cards=tag_cards,
         all_video_cards=all_video_cards,  # Use the new combined and sorted list
+        total_videos=total_videos,
+        total_videos_label=format_count(total_videos),
+        current_page=page,
+        has_prev_page=page > 1,
+        has_next_page=has_more_pages,
+        prev_page_url=f"/?page={page-1}&sort={sort}" if page > 1 else None,
+        next_page_url=f"/?page={page+1}&sort={sort}" if has_more_pages else None,
         content_warning=CONTENT_WARNING,
         show_content_warning=show_content_warning,
         sort=sort,
@@ -249,7 +293,7 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
                                     page: int = 1, sort: str = 'date') -> dict:
     """Assemble the paginated gallery context for a single tag share's page."""
     # Set pagination parameters
-    per_page = 120  # Limit videos per page
+    per_page = GALLERY_PAGE_SIZE  # videos per page
     # Ensure page is at least 1
     if page < 1:
         page = 1
@@ -329,7 +373,8 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
         prev_page_url=f"/tag/{share_id}?page={page-1}&sort={sort}" if page > 1 else None,
         next_page_url=f"/tag/{share_id}?page={page+1}&sort={sort}" if has_more_pages else None,
         tag_name=tag_share.tag_name,
-        total_videos=len(video_cards),
+        total_videos=total_count,
+        total_videos_label=format_count(total_count),
         sort=sort,
     )
     return context
@@ -419,15 +464,18 @@ async def build_tag_name_gallery_context(db: Session, tag_name: str) -> dict:
 
     await _warm_thumbnails(warm_coros)
 
-    # Sort video cards by name
-    video_cards.sort(key=lambda x: x['video_name'])
+    # Sort video cards by name (A→Z), untitled videos last.
+    video_cards.sort(key=lambda x: _title_sort_key(x.get('video_name')))
 
-    logger.info(f"Rendering gallery for tag '{tag_name}' with {len(video_cards)} videos.")
+    total_videos = len(video_cards)
+    logger.info(f"Rendering gallery for tag '{tag_name}' with {total_videos} videos.")
 
     context = site_context()
     context.update(
         tag_name=tag_name,
         video_cards=video_cards,
+        total_videos=total_videos,
+        total_videos_label=format_count(total_videos),
         current_page=None,  # Disabling pagination for this view
         has_prev_page=False,
         has_next_page=False,

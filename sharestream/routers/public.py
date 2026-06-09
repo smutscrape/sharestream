@@ -18,10 +18,10 @@ router = APIRouter()
 
 
 @router.get("/", response_class=HTMLResponse)
-async def home(request: Request, sort: str = 'date', db: Session = Depends(get_db)):
+async def home(request: Request, sort: str = 'date', page: int = 1, db: Session = Depends(get_db)):
     # Root endpoint for home page showing all available content
     try:
-        context = await build_home_context(db, request, sort)
+        context = await build_home_context(db, request, sort, page=page)
         return HTMLResponse(content=render("home.html", **context))
     except Exception as e:
         logger.error(f"Error displaying gallery: {e}", exc_info=True)

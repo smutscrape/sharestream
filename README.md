@@ -95,10 +95,8 @@ social_links:
   - name: "Mastodon"
     logo: "./static/social_logos/mastodon.svg"
     url: "https://mastodon.social/@you"
-    rel: "me"          # optional
+    rel: "me" # include this for Mastodon verification
 
-# NOTE: this section is still named "sharestream" internally (legacy) and will be
-# renamed in a future release.
 sharestream:
   host: "0.0.0.0"
   port: 6969

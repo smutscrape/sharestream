@@ -23,7 +23,7 @@
         </header>
         
         {% if tag_name %}
-        <h1>Tag: {{ tag_name }}</h1>
+        <h1>Tag: {{ tag_name }}{% if total_videos %} ({{ total_videos_label }} total){% endif %}</h1>
         {% endif %}
         
         <!-- Sort Dropdown -->
