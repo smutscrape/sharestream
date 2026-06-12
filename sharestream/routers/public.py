@@ -8,9 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
+from sharestream.config import DEFAULT_SORT
 from sharestream.core.templates import render
 from sharestream.db.session import get_db
-from sharestream.services.galleries import build_home_context, build_tag_name_gallery_context
+from sharestream.services.galleries import (
+    build_home_context,
+    build_tag_name_gallery_context,
+    normalize_sort,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +23,13 @@ router = APIRouter()
 
 
 @router.get("/", response_class=HTMLResponse)
-async def home(request: Request, sort: str = 'date', page: int = 1, db: Session = Depends(get_db)):
-    # Root endpoint for home page showing all available content
+async def home(request: Request, sort: str | None = None, page: int = 1, db: Session = Depends(get_db)):
+    # Root endpoint for home page showing all available content. An explicit
+    # ?sort= (from the dropdown) wins; otherwise fall back to the configured
+    # default sort mode.
     try:
-        context = await build_home_context(db, request, sort, page=page)
+        effective_sort = normalize_sort(sort) or DEFAULT_SORT
+        context = await build_home_context(db, request, effective_sort, page=page)
         return HTMLResponse(content=render("home.html", **context))
     except Exception as e:
         logger.error(f"Error displaying gallery: {e}", exc_info=True)

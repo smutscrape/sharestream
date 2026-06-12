@@ -42,6 +42,13 @@ ADMIN_USERNAME = config['sharestream']['admin_username']
 ADMIN_PASSWORD = config['sharestream']['admin_password']
 DEFAULT_RESOLUTION = config['sharestream'].get('default_resolution', 'MEDIUM')
 SHARE_ID_LENGTH = config['sharestream'].get('share_id_length', 8)
+# Default gallery sort mode for the home page and tag-share pages (the values the
+# sort dropdown offers). Individual tag shares can override it in the admin panel.
+# Falls back to 'date' when unset/invalid.
+VALID_SORTS = {'date', 'title', 'hits', 'rating', 'random'}
+DEFAULT_SORT = str(config['sharestream'].get('default_sort', 'date')).strip().lower()
+if DEFAULT_SORT not in VALID_SORTS:
+    DEFAULT_SORT = 'date'
 SITE_NAME = config.get('site_name', 'Sharestream')  # Add site_name with fallback
 SITE_MOTTO = config.get('site_motto', '')  # Add site_motto with empty default
 SOCIAL_LINKS = config.get('social_links', [])  # Add social_links with empty list default

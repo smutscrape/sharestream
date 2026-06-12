@@ -22,7 +22,7 @@ from sharestream.backends.stash import (
     get_scene_meta,
     get_videos_by_tag,
 )
-from sharestream.config import CONTENT_WARNING
+from sharestream.config import CONTENT_WARNING, VALID_SORTS
 from sharestream.core.branding import site_context
 from sharestream.db.models import SharedTag, SharedVideo
 from sharestream.services.access import tag_share_respects_limit_tag
@@ -51,6 +51,15 @@ def format_count(n: int) -> str:
         s = f"{n / 1000:.1f}".rstrip('0').rstrip('.')
         return f"{s}k"
     return str(n)
+
+
+def normalize_sort(value) -> str | None:
+    """Return a valid sort mode (lowercased), or None for unknown/empty input
+    so callers can fall back to a per-share or the configured default."""
+    if not value:
+        return None
+    v = str(value).strip().lower()
+    return v if v in VALID_SORTS else None
 
 
 def format_duration(seconds) -> str | None:

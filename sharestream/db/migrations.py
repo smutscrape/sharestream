@@ -43,4 +43,5 @@ def init_db() -> None:
     _ensure_column("shared_videos", "embed_mode", "VARCHAR")
     _ensure_column("shared_tags", "embed_mode", "VARCHAR")
     _ensure_column("shared_tags", "sort_order", "INTEGER DEFAULT 0")
+    _ensure_column("shared_tags", "default_sort", "VARCHAR")
     _seed_tag_sort_order()

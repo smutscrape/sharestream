@@ -36,6 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const tagResolutionInput = document.getElementById('tag-resolution');
     const tagSharePasswordInput = document.getElementById('tag-share-password');
     const tagShowInGalleryInput = document.getElementById('tag-show-in-gallery');
+    const tagDefaultSortSelect = document.getElementById('default-sort-tag');
     const lookupTagButton = document.getElementById('lookup-tag-button');
     const tagShareMessage = document.getElementById('tag-share-message');
     const tagShareError = document.getElementById('tag-share-error');
@@ -65,6 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const editTagDaysValidInput = document.getElementById('edit-tag-days-valid');
     const editTagResolutionInput = document.getElementById('edit-tag-resolution');
     const editTagEmbedModeSelect = document.getElementById('edit-tag-embed-mode');
+    const editTagDefaultSortSelect = document.getElementById('edit-tag-default-sort');
     const editTagSharePasswordInput = document.getElementById('edit-tag-share-password');
     const editTagShowInGalleryInput = document.getElementById('edit-tag-show-in-gallery');
     const editTagClearPasswordInput = document.getElementById('edit-tag-clear-password');
@@ -453,7 +455,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 password: tagSharePasswordInput.value || null,
                 show_in_gallery: tagShowInGalleryInput.checked,
                 custom_share_id: customShareId,
-                embed_mode: (tagEmbedModeSelect && tagEmbedModeSelect.value) || null
+                embed_mode: (tagEmbedModeSelect && tagEmbedModeSelect.value) || null,
+                default_sort: (tagDefaultSortSelect && tagDefaultSortSelect.value) || null
             };
 
             logDebug('Sharing tag with data:', shareTagData);
@@ -596,7 +599,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         data-resolution="${escapeHTML(tag.resolution)}" 
                         data-has-password="${tag.has_password}" 
                         data-show-in-gallery="${tag.show_in_gallery}"
-                        data-embed-mode="${escapeHTML(tag.embed_mode || '')}">Edit</button>
+                        data-embed-mode="${escapeHTML(tag.embed_mode || '')}"
+                        data-default-sort="${escapeHTML(tag.default_sort || '')}">Edit</button>
                     <button class="delete-tag-button" data-share-id="${escapeHTML(tag.share_id)}">Delete</button>
                 </td>
             `;
@@ -713,6 +717,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if(editTagDaysValidInput) editTagDaysValidInput.value = Math.max(1, parseInt(t.getAttribute('data-days-valid')) || 7);
                 if(editTagResolutionInput) editTagResolutionInput.value = t.getAttribute('data-resolution') || 'MEDIUM';
                 if(editTagEmbedModeSelect) editTagEmbedModeSelect.value = t.getAttribute('data-embed-mode') || '';
+                if(editTagDefaultSortSelect) editTagDefaultSortSelect.value = t.getAttribute('data-default-sort') || '';
                 if(editTagSharePasswordInput) editTagSharePasswordInput.value = '';
                 if(editTagShowInGalleryInput) editTagShowInGalleryInput.checked = t.getAttribute('data-show-in-gallery') === 'true';
                 if(editTagClearPasswordInput) editTagClearPasswordInput.checked = false;
@@ -796,6 +801,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 password: editTagSharePasswordInput.value || null,
                 show_in_gallery: editTagShowInGalleryInput.checked,
                 embed_mode: (editTagEmbedModeSelect && editTagEmbedModeSelect.value) || null,
+                default_sort: (editTagDefaultSortSelect && editTagDefaultSortSelect.value) || null,
                 clear_password: editTagClearPasswordInput ? editTagClearPasswordInput.checked : false
             };
 

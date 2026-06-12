@@ -40,12 +40,12 @@ async def short_share(slug: str, request: Request = None, db: Session = Depends(
         return await share_page(share_id=slug, request=request, db=db)
     if is_tag:
         page = 1
-        sort = 'date'
+        sort = None  # absent -> let tag_share_page apply the per-share/config default
         if request is not None:
             try:
                 page = int(request.query_params.get('page', 1))
             except (TypeError, ValueError):
                 page = 1
-            sort = request.query_params.get('sort', 'date')
+            sort = request.query_params.get('sort')
         return await tag_share_page(share_id=slug, request=request, page=page, sort=sort, db=db)
     raise HTTPException(status_code=404, detail="Not found")

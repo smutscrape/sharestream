@@ -26,6 +26,10 @@ sharestream:
   admin_password: your_secure_password
   default_resolution: MEDIUM # LOW MEDIUM OR HIGH
   share_id_length: 8
+  # Optional: default sort mode for the home page and tag-share galleries.
+  # One of: date | title | hits | rating | random (defaults to 'date').
+  # Individual tag shares can override this in the admin panel.
+  default_sort: date
   # Optional. Signs admin sessions and per-share password-unlock cookies. If you
   # omit it, a key is generated once and persisted to ./.secret_key so logins and
   # share passwords survive restarts. Set an explicit value here (any long random

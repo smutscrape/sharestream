@@ -13,7 +13,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from sharestream.backends.stash import get_video_details, get_videos_by_tag, get_videos_by_tag_name
-from sharestream.config import BASE_DOMAIN, SHARES_DIR
+from sharestream.config import BASE_DOMAIN, DEFAULT_SORT, SHARES_DIR
 from sharestream.core.branding import site_context
 from sharestream.core.security import get_current_user, pwd_context
 from sharestream.core.templates import render
@@ -23,7 +23,7 @@ from sharestream.schemas.shares import ShareTagRequest
 from sharestream.services import access
 from sharestream.services.cache import is_video_in_tag
 from sharestream.services.embed_policy import normalize_embed_mode, should_embed_full
-from sharestream.services.galleries import build_tag_gallery_context
+from sharestream.services.galleries import build_tag_gallery_context, normalize_sort
 from sharestream.services.hits import get_total_plays, increment_tag_hit, increment_tag_video_hit
 from sharestream.services.slugs import generate_share_id, validate_custom_share_id
 from sharestream.services.visitors import log_first_visit
@@ -103,6 +103,7 @@ async def share_tag(request: ShareTagRequest,
             password_hash=password_hash,
             show_in_gallery=request.show_in_gallery,
             embed_mode=normalize_embed_mode(request.embed_mode),
+            default_sort=normalize_sort(request.default_sort),
             sort_order=max_order + 1
         )
         db.add(shared_tag)
@@ -148,6 +149,8 @@ async def edit_tag_share(share_id: str, request: ShareTagRequest,
         tag.show_in_gallery = request.show_in_gallery
         if 'embed_mode' in request.model_fields_set:
             tag.embed_mode = normalize_embed_mode(request.embed_mode)
+        if 'default_sort' in request.model_fields_set:
+            tag.default_sort = normalize_sort(request.default_sort)
         db.commit()
 
         # Drop cached per-video playlists for this tag so any resolution change
@@ -190,7 +193,7 @@ async def delete_tag_share(share_id: str,
 
 
 @router.get("/tag/{share_id}", response_class=HTMLResponse, response_model=None)
-async def tag_share_page(share_id: str, request: Request = None, page: int = 1, sort: str = 'date',
+async def tag_share_page(share_id: str, request: Request = None, page: int = 1, sort: str | None = None,
                          db: Session = Depends(get_db)):
     tag_share = db.query(SharedTag).filter_by(share_id=share_id).first()
     if not tag_share:
@@ -209,7 +212,11 @@ async def tag_share_page(share_id: str, request: Request = None, page: int = 1, 
     # count hit BEFORE showing page
     increment_tag_hit(db, tag_share)
 
-    context = await build_tag_gallery_context(db, tag_share, share_id, page=page, sort=sort)
+    # An explicit ?sort= (from the dropdown) wins; otherwise use this share's
+    # configured default sort, falling back to the global config default.
+    effective_sort = normalize_sort(sort) or normalize_sort(tag_share.default_sort) or DEFAULT_SORT
+
+    context = await build_tag_gallery_context(db, tag_share, share_id, page=page, sort=effective_sort)
     return HTMLResponse(render("gallery.html", **context))
 
 
