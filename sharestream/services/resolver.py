@@ -39,6 +39,10 @@ class ResolvedMedia:
     tag_share_id: Optional[str] = None
     stash_tag_id: Optional[str] = None
     title: Optional[str] = None
+    # Whether the tag share is featured on the home gallery. Only meaningful for
+    # tag videos; it (together with password_hash) decides whether the share's
+    # media stays limited to limit_to_tag. Always False for individual shares.
+    show_in_gallery: bool = False
 
     @property
     def is_tag_video(self) -> bool:
@@ -101,6 +105,7 @@ def resolve_media(db: Session, share_id: str) -> Optional[ResolvedMedia]:
                 tag_share_id=tag_share_id,
                 stash_tag_id=tag_share.stash_tag_id,
                 title=None,
+                show_in_gallery=tag_share.show_in_gallery,
             )
 
     return None

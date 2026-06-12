@@ -163,6 +163,26 @@ def password_prompt_if_locked(request: Request, share_id: str,
 
 
 # ------------------------------------------------------------------
+# limit_to_tag scope for a tag share's OWN surfaces
+# ------------------------------------------------------------------
+def tag_share_respects_limit_tag(password_hash: Optional[str], show_in_gallery: bool) -> bool:
+    """Whether the global ``limit_to_tag`` filter applies to a tag share's OWN
+    pages/media (its ``/tag/{share_id}`` gallery, ``/tag/{share_id}/video/{id}``
+    page, and that share's media sub-requests).
+
+    Only a PUBLIC, home-featured tag share is limited. A share that is
+    password-protected OR not featured on the home gallery is treated as a
+    deliberate, capability-URL share whose recipient may reach the tag's full
+    contents, so the filter is bypassed for it.
+
+    This governs ONLY a share's own surfaces. The public aggregation pages (the
+    home gallery and ``/gallery/tag/{name}``) always apply the filter regardless,
+    so non-curated videos never surface while browsing the site.
+    """
+    return password_hash is None and bool(show_in_gallery)
+
+
+# ------------------------------------------------------------------
 # Media authorization for a resolved share/video
 # ------------------------------------------------------------------
 async def authorize_media(request: Request, resolved) -> None:
@@ -178,9 +198,11 @@ async def authorize_media(request: Request, resolved) -> None:
         raise HTTPException(status_code=403, detail="Password required")
 
     if resolved.is_tag_video:
-        # Password-protected tag shares bypass the limit_to_tag filter (vetted
-        # recipient), so membership is checked against the tag's full contents.
-        respect_limit = resolved.password_hash is None
+        # Only a public, home-featured tag share is limited to limit_to_tag;
+        # password-protected OR non-featured (capability-URL) shares reach the
+        # tag's full contents, so membership is checked against the full set.
+        respect_limit = tag_share_respects_limit_tag(resolved.password_hash,
+                                                     resolved.show_in_gallery)
         if not await is_video_in_tag(resolved.stash_tag_id, resolved.stash_video_id,
                                      respect_limit_tag=respect_limit):
             raise HTTPException(status_code=404, detail="Video not found in this tag")
@@ -209,14 +231,15 @@ async def authorize_tag_video(request: Request, share_id: str, video_id: int) ->
         password_hash = tag_share.password_hash
         stash_tag_id = tag_share.stash_tag_id
         expires_at = tag_share.expires_at
+        show_in_gallery = tag_share.show_in_gallery
         db.expunge(tag_share)
     # ---- session released; no DB connection held past this point ----
     ensure_not_expired(expires_at, "Tag share has expired")
     if not media_access_ok(request, share_id, password_hash):
         raise HTTPException(status_code=403, detail="Password required")
-    # Password-protected shares are vetted, so they see the tag's full contents;
-    # public shares stay limited to limit_to_tag.
-    respect_limit = password_hash is None
+    # Only a public, home-featured share stays limited to limit_to_tag; password-
+    # protected OR non-featured (capability-URL) shares see the tag's full contents.
+    respect_limit = tag_share_respects_limit_tag(password_hash, show_in_gallery)
     if not await is_video_in_tag(stash_tag_id, video_id, respect_limit_tag=respect_limit):
         raise HTTPException(status_code=404, detail="Video not found in this tag")
     return tag_share

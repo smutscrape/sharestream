@@ -71,6 +71,9 @@ async def get_scene_meta(video_ids: list[int]) -> dict[int, dict]:
                         rating100
                         date
                         created_at
+                        files {
+                            duration
+                        }
                     }
                 }
             }
@@ -92,6 +95,7 @@ async def get_scene_meta(video_ids: list[int]) -> dict[int, dict]:
                 "rating": scene.get("rating100"),
                 "date": scene.get("date"),
                 "created_at": scene.get("created_at"),
+                "duration": (scene.get("files") or [{}])[0].get("duration"),
             }
             for scene in scenes
         }
@@ -167,9 +171,10 @@ async def get_videos_by_tag(tag_id: str, page: int = 1, per_page: int = 1000, so
     """Get videos that have a specific tag - returns (videos, total_count).
 
     ``respect_limit_tag`` (default True) controls whether the global
-    ``limit_to_tag`` safety filter is applied. Password-protected tag shares
-    pass ``respect_limit_tag=False`` so a vetted, password-gated share can reach
-    the tag's full contents while public shares stay limited to the approved
+    ``limit_to_tag`` safety filter is applied. Tag shares that aren't a featured
+    public home-gallery share (i.e. password-protected OR non-featured) pass
+    ``respect_limit_tag=False`` so a vetted/capability-URL share can reach the
+    tag's full contents while featured public shares stay limited to the approved
     tag. When ``limit_to_tag`` is unset this argument has no effect.
     """
     # Compose tag filter
@@ -228,6 +233,7 @@ async def get_videos_by_tag(tag_id: str, page: int = 1, per_page: int = 1000, so
                             __typename
                         }
                         files {
+                            duration
                             width
                             height
                             __typename
@@ -264,6 +270,7 @@ async def get_videos_by_tag(tag_id: str, page: int = 1, per_page: int = 1000, so
                 "rating": scene.get("rating100"),
                 "date": scene.get("date"),
                 "created_at": scene.get("created_at"),
+                "duration": (scene.get("files") or [{}])[0].get("duration"),
                 "screenshot": scene["paths"]["screenshot"],
                 "preview": scene["paths"]["preview"],
                 "tags": [{"id": tag["id"], "name": tag["name"]} for tag in scene.get("tags", [])

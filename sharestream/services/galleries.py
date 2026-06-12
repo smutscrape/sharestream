@@ -25,8 +25,9 @@ from sharestream.backends.stash import (
 from sharestream.config import CONTENT_WARNING
 from sharestream.core.branding import site_context
 from sharestream.db.models import SharedTag, SharedVideo
+from sharestream.services.access import tag_share_respects_limit_tag
 from sharestream.services.cache import prime_tag_membership
-from sharestream.services.hits import get_tag_video_hits_map
+from sharestream.services.hits import get_total_plays_map
 from sharestream.services.thumbnails import (
     fetch_and_cache_tag_video_thumbnail,
     fetch_and_cache_thumbnail,
@@ -50,6 +51,29 @@ def format_count(n: int) -> str:
         s = f"{n / 1000:.1f}".rstrip('0').rstrip('.')
         return f"{s}k"
     return str(n)
+
+
+def format_duration(seconds) -> str | None:
+    """Compact runtime label for a card badge.
+
+    < 90 seconds  -> whole seconds  ('66s')
+    < 90 minutes  -> whole minutes  ('75m')
+    otherwise     -> hours, 1 decimal ('1.5h')
+
+    Returns None for unknown/zero durations so the template omits the badge.
+    """
+    try:
+        s = float(seconds)
+    except (TypeError, ValueError):
+        return None
+    if s <= 0:
+        return None
+    if s < 90:
+        return f"{round(s)}s"
+    minutes = s / 60
+    if minutes < 90:
+        return f"{round(minutes)}m"
+    return f"{s / 3600:.1f}h"
 
 
 def _title_sort_key(title):
@@ -140,8 +164,6 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
     all_tag_videos = {}  # {video_id: video_info}
     tag_cards = []
     warm_coros = []  # thumbnails to pre-warm concurrently once the page is assembled
-    # One batched hit-count lookup per gallery tag (was an N+1 over every video).
-    hits_by_tag = {tag.share_id: get_tag_video_hits_map(db, tag.share_id) for tag in tag_shares}
     tag_video_results = await asyncio.gather(
         *(get_videos_by_tag(tag.stash_tag_id) for tag in tag_shares)
     ) if tag_shares else []
@@ -184,6 +206,10 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
     individual_video_ids = [v.stash_video_id for v in individual_videos]
     meta = await get_scene_meta(individual_video_ids)
 
+    # Aggregate play counts per Stash scene (across individual + every tag share)
+    # in one batched lookup, so a video's count is identical on every surface.
+    total_plays = get_total_plays_map(db, list(individual_video_ids) + list(all_tag_videos.keys()))
+
     # 3. Create a combined list of all video cards
     all_video_cards = []
 
@@ -197,7 +223,8 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
             "preview_url": f"/share/{video.share_id}/webp",
             "thumbnail_url": None,  # Will be lazy loaded
             "lazy_thumbnail_url": f"/share/{video.share_id}/thumbnail.jpg",
-            "hits": video.hits,
+            "hits": total_plays.get(video.stash_video_id, 0),
+            "duration_label": format_duration(m.get("duration")),
             "stash_video_id": video.stash_video_id,
             "rating": m.get("rating") or 0,
             "sort_date": effective_sort_date(m.get("date"), m.get("created_at"))
@@ -217,7 +244,8 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
                 "preview_url": f"/tag/{tag_share_id}/video/{video_id}/webp",
                 "thumbnail_url": None,  # Will be lazy loaded
                 "lazy_thumbnail_url": f"/tag/{tag_share_id}/thumbnail/{video_id}",
-                "hits": hits_by_tag.get(tag_share_id, {}).get(video_id, 0),
+                "hits": total_plays.get(video_id, 0),
+                "duration_label": format_duration(video_data.get("duration")),
                 "stash_video_id": video_id,
                 "rating": video_data.get("rating", 0) or 0,
                 "sort_date": effective_sort_date(video_data.get("date"), video_data.get("created_at"))
@@ -302,13 +330,16 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
     videos = []
     total_count = 0
 
-    # A password-protected tag share is a vetted, gated view, so it shows the
-    # tag's full contents; a public share stays limited to limit_to_tag.
-    respect_limit = tag_share.password_hash is None
+    # Only a public, home-featured tag share stays limited to limit_to_tag.
+    # A password-protected OR non-featured (capability-URL) share is a deliberate
+    # share, so its own gallery shows the tag's full contents.
+    respect_limit = tag_share_respects_limit_tag(tag_share.password_hash,
+                                                 tag_share.show_in_gallery)
 
-    # One batched hit-count lookup for the whole tag share (was an N+1: one query
-    # per card, or — for hits sort — one query per scene in the entire tag).
-    hits_map = get_tag_video_hits_map(db, share_id)
+    # Aggregate play counts per Stash scene (across every share context), so a
+    # video's count matches the home page and its own video page. Populated once
+    # the scene ids are known below.
+    total_plays: dict[int, int] = {}
 
     if sort == 'random':
         # Let Stash handle random sort, paginating via Stash.
@@ -316,6 +347,7 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
                                                  respect_limit_tag=respect_limit)  # get total count
         videos, _ = await get_videos_by_tag(tag_share.stash_tag_id, page=page, per_page=per_page,
                                             sort_by='random', respect_limit_tag=respect_limit)
+        total_plays = get_total_plays_map(db, [int(v["id"]) for v in videos])
     else:
         # Fetch all, then sort in Python and paginate. This keeps Title a
         # normal A→Z sort and Date a release-date sort (with a created_at
@@ -328,9 +360,10 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
         prime_tag_membership(tag_share.stash_tag_id,
                              (int(v["id"]) for v in all_videos_raw),
                              respect_limit_tag=respect_limit)
+        total_plays = get_total_plays_map(db, [int(v["id"]) for v in all_videos_raw])
         if sort == 'hits':
             for video_raw in all_videos_raw:
-                video_raw['hits'] = hits_map.get(int(video_raw["id"]), 0)
+                video_raw['hits'] = total_plays.get(int(video_raw["id"]), 0)
         sort_video_dicts(all_videos_raw, sort)
         total_count = len(all_videos_raw)
         start = (page - 1) * per_page
@@ -359,7 +392,8 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
             "preview_url": f"/tag/{share_id}/video/{video['id']}/webp",
             "thumbnail_url": thumb_route if eager else "/static/default_thumbnail.jpg",
             "lazy_thumbnail_url": thumb_route if not eager else None,
-            "hits": hits_map.get(int(video["id"]), 0)
+            "hits": total_plays.get(int(video["id"]), 0),
+            "duration_label": format_duration(video.get("duration")),
         })
 
     await _warm_thumbnails(warm_coros)
@@ -393,6 +427,11 @@ async def build_tag_name_gallery_context(db: Session, tag_name: str) -> dict:
     # 2. Find all videos with this tag from Stash
     target_videos_list = await get_all_videos_by_tag(tag_id)
     target_video_ids = {int(v['id']) for v in target_videos_list}
+    # Runtime per scene (for the duration badge) from the same Stash payload.
+    durations = {int(v['id']): v.get('duration') for v in target_videos_list}
+    # One aggregate play-count lookup for every candidate scene, so counts match
+    # the rest of the site regardless of which share surfaced the video here.
+    total_plays = get_total_plays_map(db, target_video_ids)
 
     # If no videos have this tag, we can show an empty gallery
     if not target_video_ids:
@@ -427,7 +466,8 @@ async def build_tag_name_gallery_context(db: Session, tag_name: str) -> dict:
                 "preview_url": f"/share/{video.share_id}/webp",
                 "video_name": video.video_name,
                 "thumbnail_url": f"/share/{video.share_id}/thumbnail.jpg",
-                "hits": video.hits,
+                "hits": total_plays.get(video.stash_video_id, 0),
+                "duration_label": format_duration(durations.get(video.stash_video_id)),
                 "lazy_thumbnail_url": None,
             })
             processed_video_ids.add(video.stash_video_id)
@@ -435,8 +475,6 @@ async def build_tag_name_gallery_context(db: Session, tag_name: str) -> dict:
     # 5. Process tag shares. Fetch each tag share's scenes concurrently, then
     # process the results in original order (preserving dedup behavior).
     logger.info(f"Processing {len(tag_shares)} tag shares for tag '{tag_name}' gallery...")
-    # Batched hit lookups: one query per tag share instead of one per match.
-    hits_by_tag = {t.share_id: get_tag_video_hits_map(db, t.share_id) for t in tag_shares}
     tag_videos_lists = await asyncio.gather(
         *(get_all_videos_by_tag(t.stash_tag_id) for t in tag_shares)
     ) if tag_shares else []
@@ -450,15 +488,14 @@ async def build_tag_name_gallery_context(db: Session, tag_name: str) -> dict:
                 thumbnail_url = "/static/default_thumbnail.jpg"
                 lazy_thumbnail_url = f"/tag/{tag_share.share_id}/thumbnail/{video_id}"
 
-                hits = hits_by_tag.get(tag_share.share_id, {}).get(video_id, 0)
-
                 video_cards.append({
                     "share_url": f"/{tag_share.share_id}/{video_id}",
                     "preview_url": f"/tag/{tag_share.share_id}/video/{video_id}/webp",
                     "video_name": video["title"],
                     "thumbnail_url": thumbnail_url,
                     "lazy_thumbnail_url": lazy_thumbnail_url,
-                    "hits": hits,
+                    "hits": total_plays.get(video_id, 0),
+                    "duration_label": format_duration(video.get("duration")),
                 })
                 processed_video_ids.add(video_id)
 

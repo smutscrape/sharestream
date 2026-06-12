@@ -1,10 +1,11 @@
 """Tag-membership cache: partitioning, the cheap probe, priming, and fallback.
 
-A single Stash tag can be exposed two ways at once: a public share (limit_to_tag
-applied -> filtered set) and a password-protected share (limit_to_tag bypassed ->
-full set). Every cache here keys on (tag_id, respect_limit_tag) so the two never
-clobber one another — otherwise a public share could serve un-curated videos, or
-a private share could 404 valid ones.
+A single Stash tag can be exposed two ways at once: a featured public share
+(limit_to_tag applied -> filtered set) and a password-protected or non-featured
+share (limit_to_tag bypassed -> full set). Every cache here keys on
+(tag_id, respect_limit_tag) so the two never clobber one another — otherwise a
+limited share could serve un-curated videos, or a full-access share could 404
+valid ones.
 
 is_video_in_tag resolves a lone video via a cheap single-scene probe
 (tag_contains_scene) rather than listing the whole tag; a primed id set short-

@@ -110,7 +110,7 @@ stash:
   server_ip: "127.0.0.1"
   port: 9999
   api_key: "your_stash_api_key"
-  # limit_to_tag: 10844   # Optional: public tag shares only surface videos that ALSO carry this tag; password-protected shares bypass it
+  # limit_to_tag: 10844   # Optional: browsable pages (home + /gallery/tag) only surface videos that ALSO carry this tag; a share's own pages stay limited only while featured on home with no password
 
 # Social‑embed (og:video) policy for link previews
 embed:
@@ -205,24 +205,26 @@ All media (previews, full video, thumbnails, HLS segments) is **proxied from the
 
 - **JWT Authentication**: secure admin access
 - **Capability URLs**: shares are reached via unguessable tokens (or your chosen custom slug), never by raw source IDs
-- **`limit_to_tag`**: when set, **public** tag shares only ever surface videos that also carry your approved tag — across the gallery, streams, previews, and thumbnails. Password‑protected shares deliberately bypass this filter (see [`limit_to_tag` and password protection](#limit_to_tag-and-password-protection))
+- **`limit_to_tag`**: when set, anything reachable by *browsing* the site (the home gallery and `/gallery/tag/{name}`) only ever surfaces videos that also carry your approved tag — across the gallery, streams, previews, and thumbnails. A tag share's own pages stay limited only while it's featured on home with no password; password‑protected or non‑featured (capability‑URL) shares deliberately reach the full tag (see [`limit_to_tag`, featured shares, and password protection](#limit_to_tag-featured-shares-and-password-protection))
 - **Password Protection**: optional per‑share passwords, enforced on both pages and media via a signed unlock cookie
 - **Auto‑Expiration**: links expire on schedule
 - **Credential Protection**: your source server's API key stays server‑side
 - **Anonymous Tracking**: no personal data collected
 
-### `limit_to_tag` and password protection
+### `limit_to_tag`, featured shares, and password protection
 
-When `limit_to_tag` is set, Sharestream treats that tag as a **public‑content boundary**, and a tag share's password decides whether the boundary applies:
+When `limit_to_tag` is set, Sharestream treats that tag as a **public‑content boundary** for everything reachable by *browsing the site*, and applies it in two layers:
 
-- **Public tag shares (no password) are limited to the approved tag.** Their gallery, thumbnails, previews, and streams only ever surface videos carrying *both* the share's tag *and* `limit_to_tag`. The home page and the `/gallery/tag/{name}` view (which list only public shares) are limited the same way.
-- **Password‑protected tag shares bypass the filter.** A vetted, password‑gated share reaches the tag's full contents — so you can publish a curated subset publicly (by tagging it with `limit_to_tag`) while sharing the complete tag privately behind a password.
+- **Browsable/aggregation pages are always limited.** The home gallery and the `/gallery/tag/{name}` view only ever surface videos carrying *both* the relevant tag *and* `limit_to_tag`, no matter which shares they draw from. Non‑curated videos never appear while navigating the site.
+- **A tag share's *own* pages and media are limited only when the share is *featured on the home gallery* (`show_in_gallery`) and has *no password*.** That single, broadly‑advertised, public surface stays curated. Every other tag share is treated as a deliberate, capability‑URL share and reaches the tag's **full** contents:
+  - **Password‑protected tag shares bypass the filter** — a vetted, password‑gated recipient sees the complete tag.
+  - **Non‑featured public tag shares bypass the filter** — they aren't advertised on the home gallery and are reachable only by their unguessable share link, so that link grants the full tag.
 
-The mental model: `limit_to_tag` is your curation boundary for the public web; a password is a deliberate, vetted escape hatch from it.
+The mental model: `limit_to_tag` is your curation boundary for anything a stranger could stumble onto by browsing; a password *or* an unlisted (non‑featured) share link is a deliberate way to hand someone the full tag.
 
 > **Notes**
 > - Individual (single‑video) shares are unaffected by `limit_to_tag` either way — they point at a specific video you selected in the admin panel and are gated only by their capability URL and optional password.
-> - Removing the password from a tag share re‑applies the filter immediately, which can hide videos that were previously visible through it.
+> - Toggling a tag share to *featured on home* (with no password) re‑applies the filter to its own pages immediately, which can hide videos that were previously visible through its link; un‑featuring it (or adding a password) re‑exposes the full tag.
 
 ## Customization
 
@@ -274,7 +276,7 @@ Those are served live (no restart needed) — hard‑refresh and purge your CDN.
 - **Smart social embeds**: animated WebP / JPEG content negotiation, Mastodon `/embed` player, configurable preview‑vs‑full policy
 - **Date‑based default sorting** (release date, falling back to date added)
 - **Drop‑in branding**: SVG logo, generated/overridable favicon, per‑slot custom fonts
-- **`limit_to_tag`** safety enforced on every public tag‑share access path (password‑protected shares bypass it)
+- **`limit_to_tag`** safety enforced on every browsable surface (home + `/gallery/tag`); a tag share's own pages stay limited only while featured on home with no password (password‑protected or non‑featured shares reach the full tag)
 
 ## Contributing
 

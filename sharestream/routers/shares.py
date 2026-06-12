@@ -20,7 +20,7 @@ from sharestream.db.session import get_db
 from sharestream.schemas.shares import ShareVideoRequest
 from sharestream.services import access
 from sharestream.services.embed_policy import normalize_embed_mode, should_embed_full
-from sharestream.services.hits import increment_share_hit
+from sharestream.services.hits import get_total_plays, increment_share_hit
 from sharestream.services.media_proxy import generate_m3u8_file
 from sharestream.services.slugs import generate_share_id, validate_custom_share_id
 from sharestream.services.visitors import log_first_visit
@@ -153,8 +153,10 @@ async def share_page(share_id: str, request: Request = None, db: Session = Depen
     if locked is not None:
         return locked
 
-    # count hit BEFORE showing page
-    hit_count = increment_share_hit(db, video)
+    # count hit BEFORE showing page, then show the aggregate play count for this
+    # video across every share context (not just this individual share's tally).
+    increment_share_hit(db, video)
+    hit_count = get_total_plays(db, video.stash_video_id)
 
     # Get full video details from Stash
     video_details = await get_video_details(video.stash_video_id)

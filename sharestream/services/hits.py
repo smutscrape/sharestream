@@ -39,6 +39,41 @@ def get_tag_video_hit(db: Session, tag_share_id: str, video_id: int) -> TagVideo
     ).first()
 
 
+def get_total_plays_map(db: Session, video_ids) -> dict[int, int]:
+    """Return ``{stash_video_id: total_plays}`` aggregated across BOTH counters.
+
+    A single Stash scene can be viewed through several share contexts — one or
+    more individual shares (``SharedVideo.hits``) and any number of tag shares
+    (``TagVideoHit.hits``, keyed per tag share). Each context tracks its own
+    tally, but a viewer's "play count" for the underlying video is the sum of
+    them all. This is the single number shown on every surface (home, tag
+    galleries, the by-tag-name gallery, the video pages) and used for the
+    "Play Count" sort, so the same video reads consistently everywhere.
+
+    Two indexed ``IN`` queries; ids with no recorded views default to 0 at the
+    call site. Multiple individual shares of the same scene are summed.
+    """
+    ids = {int(v) for v in video_ids}
+    if not ids:
+        return {}
+    totals: dict[int, int] = {vid: 0 for vid in ids}
+    for stash_video_id, hits in db.query(
+            SharedVideo.stash_video_id, SharedVideo.hits).filter(
+            SharedVideo.stash_video_id.in_(ids)).all():
+        totals[int(stash_video_id)] = totals.get(int(stash_video_id), 0) + (hits or 0)
+    for video_id, hits in db.query(
+            TagVideoHit.video_id, TagVideoHit.hits).filter(
+            TagVideoHit.video_id.in_(ids)).all():
+        totals[int(video_id)] = totals.get(int(video_id), 0) + (hits or 0)
+    return totals
+
+
+def get_total_plays(db: Session, video_id: int) -> int:
+    """Total plays for one Stash scene across every share context (see
+    :func:`get_total_plays_map`)."""
+    return get_total_plays_map(db, [video_id]).get(int(video_id), 0)
+
+
 def get_tag_video_hits_map(db: Session, tag_share_id: str) -> dict[int, int]:
     """Return {video_id: hits} for every tracked video in a tag share, in ONE query.
 

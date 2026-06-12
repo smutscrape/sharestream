@@ -76,20 +76,31 @@
             {% for video in all_video_cards %}
             <div class="video-card" data-preview-url="{{ video.preview_url }}">
                 <a href="{{ video.share_url }}">
-                    <img src="{{ video.thumbnail_url or '/static/default_thumbnail.jpg' }}" 
-                         data-lazy-src="{{ video.lazy_thumbnail_url }}"
-                         alt="{{ video.video_name }}"
-                         class="lazy-load">
-                    <img class="preview-webp" alt="" loading="lazy">
-                    {% if video.hits > 0 %}
-                    <div class="hit-counter">
-                        <svg class="eye-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M12 5C7 5 2.73 8.11 1 12.5C2.73 16.89 7 20 12 20C17 20 21.27 16.89 23 12.5C21.27 8.11 17 5 12 5Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            <circle cx="12" cy="12.5" r="3" stroke="currentColor" stroke-width="2"/>
-                        </svg>
-                        <span>{{ video.hits }}</span>
+                    <div class="thumb">
+                        <img src="{{ video.thumbnail_url or '/static/default_thumbnail.jpg' }}" 
+                             data-lazy-src="{{ video.lazy_thumbnail_url }}"
+                             alt="{{ video.video_name }}"
+                             class="lazy-load">
+                        <img class="preview-webp" alt="" loading="lazy">
+                        {% if video.hits > 0 %}
+                        <div class="hit-counter" title="Play count">
+                            <svg class="eye-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M12 5C7 5 2.73 8.11 1 12.5C2.73 16.89 7 20 12 20C17 20 21.27 16.89 23 12.5C21.27 8.11 17 5 12 5Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                <circle cx="12" cy="12.5" r="3" stroke="currentColor" stroke-width="2"/>
+                            </svg>
+                            <span>{{ video.hits }}</span>
+                        </div>
+                        {% endif %}
+                        {% if video.duration_label %}
+                        <div class="duration-badge" title="Runtime">
+                            <svg class="clock-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/>
+                                <path d="M12 7v5l3.5 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                            <span>{{ video.duration_label }}</span>
+                        </div>
+                        {% endif %}
                     </div>
-                    {% endif %}
                     <div class="title">{{ video.video_name }}</div>
                 </a>
             </div>

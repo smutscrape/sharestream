@@ -39,11 +39,12 @@ from sharestream.config import TAG_MEMBERSHIP_TTL_SECONDS
 logger = logging.getLogger(__name__)
 
 # Both caches key on (tag_id, respect_limit_tag). The respect flag MUST be part
-# of the key: a tag can be shared both publicly (limit_to_tag applied -> filtered
-# set) and as a password-protected share (limit_to_tag bypassed -> full set), and
-# the two membership answers differ. Without the flag in the key, whichever
-# request warmed the cache first would leak its answer to the other — a public
-# share could serve un-curated videos (or a private share 404 valid ones).
+# of the key: the same tag can be exposed with limit_to_tag applied (filtered set,
+# e.g. a featured public share) and with it bypassed (full set, e.g. a password-
+# protected or non-featured share), and the two membership answers differ.
+# Without the flag in the key, whichever request warmed the cache first would leak
+# its answer to the other — a limited share could serve un-curated videos (or a
+# full-access share 404 valid ones).
 _SetKey = tuple[str, bool]
 _SceneKey = tuple[str, int, bool]
 
@@ -112,8 +113,8 @@ async def get_tag_video_ids(tag_id: str, respect_limit_tag: bool = True) -> set[
     """Return the set of Stash scene ids belonging to a tag, cached with TTL.
 
     ``respect_limit_tag=False`` returns the tag's full (unfiltered) membership,
-    used by password-protected tag shares. The cache partitions on this flag so
-    the filtered and unfiltered sets never clobber one another.
+    used by password-protected or non-featured tag shares. The cache partitions
+    on this flag so the filtered and unfiltered sets never clobber one another.
     """
     key = _set_key(tag_id, respect_limit_tag)
     now = time.time()
@@ -158,7 +159,8 @@ async def is_video_in_tag(tag_id: str, video_id: int, respect_limit_tag: bool = 
     """True if video_id belongs to the given Stash tag (TTL-cached).
 
     ``respect_limit_tag=False`` checks against the tag's full contents (for
-    password-protected shares); the default checks the limit_to_tag-filtered set.
+    password-protected or non-featured shares); the default checks the
+    limit_to_tag-filtered set.
     """
     vid = int(video_id)
     now = time.time()

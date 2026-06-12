@@ -502,6 +502,13 @@ td a:hover {
     }
 }
 
+/* --- Thumbnail wrapper (positioning context for card overlays) --- */
+.video-card .thumb {
+    position: relative;
+    display: block;
+    line-height: 0;
+}
+
 /* --- Hit Counter Overlay --- */
 .hit-counter {
     position: absolute;
@@ -509,6 +516,7 @@ td a:hover {
     right: 10px;
     background: rgba(255, 0, 135, 0.5);
     backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
     border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 20px;
     padding: 4px 10px;
@@ -527,6 +535,36 @@ td a:hover {
 }
 
 .hit-counter span {
+    font-weight: 600;
+}
+
+/* --- Duration Badge Overlay (bottom-right of the thumbnail) --- */
+.duration-badge {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    background: rgba(20, 0, 24, 0.5);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 20px;
+    padding: 4px 10px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.75rem;
+    line-height: 1;
+    color: #fff;
+    z-index: 2;
+}
+
+.duration-badge .clock-icon {
+    width: 16px;
+    height: 16px;
+    color: #ff6ec7;
+}
+
+.duration-badge span {
     font-weight: 600;
 }
 

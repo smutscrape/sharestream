@@ -24,7 +24,7 @@ from sharestream.services import access
 from sharestream.services.cache import is_video_in_tag
 from sharestream.services.embed_policy import normalize_embed_mode, should_embed_full
 from sharestream.services.galleries import build_tag_gallery_context
-from sharestream.services.hits import increment_tag_hit, increment_tag_video_hit
+from sharestream.services.hits import get_total_plays, increment_tag_hit, increment_tag_video_hit
 from sharestream.services.slugs import generate_share_id, validate_custom_share_id
 from sharestream.services.visitors import log_first_visit
 
@@ -231,14 +231,19 @@ async def tag_video_page(share_id: str, video_id: int, request: Request = None,
         return locked
 
     # Verify membership via the cached tag->video-id set instead of pulling the
-    # whole tag's scene list just to locate one video. A password-protected tag
-    # share bypasses limit_to_tag (vetted recipient); a public one stays limited.
+    # whole tag's scene list just to locate one video. Only a public, home-
+    # featured tag share stays limited to limit_to_tag; a password-protected OR
+    # non-featured (capability-URL) share reaches the tag's full contents.
+    respect_limit = access.tag_share_respects_limit_tag(tag_share.password_hash,
+                                                        tag_share.show_in_gallery)
     if not await is_video_in_tag(tag_share.stash_tag_id, video_id,
-                                 respect_limit_tag=(tag_share.password_hash is None)):
+                                 respect_limit_tag=respect_limit):
         raise HTTPException(status_code=404, detail="Video not found in this tag")
 
-    # Track hits for this video
-    hit_record = increment_tag_video_hit(db, share_id, video_id)
+    # Track hits for this video (per tag-share), then display the aggregate play
+    # count for the underlying video across every share context.
+    increment_tag_video_hit(db, share_id, video_id)
+    total_plays = get_total_plays(db, video_id)
 
     # Fetch the full metadata so a tag video page shows exactly the same detail
     # as an individually-shared video. Falls back to an empty dict if it fails.
@@ -261,6 +266,6 @@ async def tag_video_page(share_id: str, video_id: int, request: Request = None,
         share_id=composite_id,  # This maps to the m3u8 URL
         video_details=video_details,
         embed_video_url=embed_video_url,
-        hit_count=hit_record.hits,
+        hit_count=total_plays,
     )
     return HTMLResponse(render("video-player.html", **context))
