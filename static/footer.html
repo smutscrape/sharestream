@@ -1,0 +1,24 @@
+{% if footer_action_links or footer_inline_links %}
+<footer class="site-footer">
+    {% if footer_action_links %}
+    <div class="footer-actions">
+        {% for link in footer_action_links %}
+        <a href="{{ link.href }}" class="footer-action footer-action-{{ link.style }}"
+           {% if link.href.startswith('http') %}target="_blank" rel="noopener noreferrer"{% endif %}>{{ link.label }}</a>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% if footer_inline_links %}
+    <nav class="footer-inline-links" aria-label="Footer">
+        {% for link in footer_inline_links %}
+        {% if not loop.first %}<span class="footer-inline-sep" aria-hidden="true">·</span>{% endif %}
+        <a href="{{ link.href }}"
+           {% if link.href.startswith('http') %}target="_blank" rel="noopener noreferrer"{% endif %}>{{ link.label }}</a>
+        {% endfor %}
+    </nav>
+    {% endif %}
+</footer>
+{% endif %}
+{% if disclaimer %}
+<p class="disclaimer">{{ disclaimer }}</p>
+{% endif %}

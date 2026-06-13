@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from sharestream.config import SECRET_KEY
 from sharestream.core.security import pwd_context
 from sharestream.core.templates import render
+from sharestream.core.branding import site_context
 from sharestream.db.models import SharedTag, SharedVideo
 from sharestream.db.session import SessionLocal
 from sharestream.services.cache import is_video_in_tag
@@ -151,6 +152,7 @@ def password_prompt_if_locked(request: Request, share_id: str,
         return resp
     html = render(
         "password-prompt.html",
+        **site_context(),
         video_name=display_name,
         share_id=share_id,
         url_password=url_password,

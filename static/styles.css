@@ -1491,16 +1491,25 @@ td a:hover {
     box-shadow: 0 6px 26px rgba(255, 0, 128, 0.6);
 }
 
-/* --- Footer Links --- */
-.footer-links {
+/* --- Site Footer --- */
+.site-footer {
     text-align: center;
     margin: 40px 0 10px 0;
-    padding: 20px 0;
+    padding: 20px 0 0;
     border-top: 1px solid rgba(180, 0, 90, 0.2);
 }
 
-.footer-links a {
-    color: #c77dff;
+.footer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.footer-action {
+    display: inline-block;
     text-decoration: none;
     font-size: 0.9rem;
     transition: all 0.3s ease;
@@ -1510,11 +1519,49 @@ td a:hover {
     border: 1px solid rgba(199, 125, 255, 0.3);
 }
 
-.footer-links a:hover {
+.footer-action-secondary {
+    color: #c77dff;
+}
+
+.footer-action-secondary:hover {
     color: #ff0080;
     background: rgba(255, 0, 128, 0.1);
     border-color: rgba(255, 0, 128, 0.4);
     text-shadow: 0 0 10px rgba(255, 0, 128, 0.5);
+}
+
+.footer-action-primary {
+    color: #90ffb0;
+    border-color: rgba(144, 255, 176, 0.35);
+}
+
+.footer-action-primary:hover {
+    color: #c8ffd8;
+    background: rgba(144, 255, 176, 0.08);
+    border-color: rgba(144, 255, 176, 0.55);
+    text-shadow: 0 0 10px rgba(144, 255, 176, 0.45);
+}
+
+.footer-inline-links {
+    font-size: 0.85rem;
+    line-height: 1.6;
+    color: #c8b3d4;
+}
+
+.footer-inline-links a {
+    color: #c8b3d4;
+    text-decoration: none;
+    transition: color 0.2s ease;
+}
+
+.footer-inline-links a:hover {
+    color: #ff6ec7;
+}
+
+.footer-inline-sep {
+    color: rgba(199, 125, 255, 0.45);
+    margin: 0 0.4em;
+    user-select: none;
 }
 
 .sort-container {

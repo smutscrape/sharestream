@@ -17,6 +17,8 @@ from pathlib import Path
 
 import yaml
 
+from sharestream.services.footer import parse_footer_config
+
 logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------
@@ -52,6 +54,7 @@ if DEFAULT_SORT not in VALID_SORTS:
 SITE_NAME = config.get('site_name', 'Sharestream')  # Add site_name with fallback
 SITE_MOTTO = config.get('site_motto', '')  # Add site_motto with empty default
 SOCIAL_LINKS = config.get('social_links', [])  # Add social_links with empty list default
+FOOTER = parse_footer_config(config)
 # Optional content warning / age-gate shown to first-time visitors on the home
 # page. Empty/unset disables it.
 CONTENT_WARNING = config.get('content_warning', '') or ''

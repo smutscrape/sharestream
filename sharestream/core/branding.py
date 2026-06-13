@@ -13,6 +13,7 @@ from pathlib import Path
 from sharestream.config import (
     BASE_DOMAIN,
     DISCLAIMER,
+    FOOTER,
     SITE_MOTTO,
     SITE_NAME,
     SOCIAL_LINKS,
@@ -104,4 +105,6 @@ def site_context() -> dict:
         "social_links": SOCIAL_LINKS,
         "base_domain": BASE_DOMAIN,
         "disclaimer": DISCLAIMER,
+        "footer_action_links": FOOTER["action_links"],
+        "footer_inline_links": FOOTER["links"],
     }

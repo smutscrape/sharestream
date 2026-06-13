@@ -78,3 +78,26 @@ content_warning: "This site contains sexually explicit material intended only fo
 
 disclaimer: "This content is shared for private use only. Unauthorized distribution is prohibited. This site does not encourage/condone illegal sexual conduct and is intended solely to provide visual pleasure for ADULTS only. Please leave this site if you are under 18 or if you find mature/explicit content offensive. All mature/explicit content on this site is strictly in compliance with 18 U.S.C. § Code 2257 i.e. all performers featured are 18 years or older of age. This site and all its associated domains being in accordance with 17 U.S.C. § 512 and the Digital Millennium Copyright Act, responds to infringement notices within 24 hours."
 
+# Site-wide footer (shown below social icons, above the disclaimer).
+# action_links = pill buttons; links = small inline text links (· separated).
+# Omit the entire ``footer`` key to keep the legacy single DMCA button.
+footer:
+  action_links:
+    - label: Join Community
+      href: /community
+      style: primary       # light-green accent
+    - label: DMCA Takedown Request
+      href: /dmca
+      style: secondary     # purple accent (legacy DMCA button styling)
+  links:
+    - label: Terms
+      href: /terms
+    - label: Privacy
+      href: /privacy
+    - label: Content Policy
+      href: /content-policy
+    - label: DMCA
+      href: /dmca
+    - label: Community
+      href: /community
+

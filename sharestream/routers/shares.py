@@ -199,6 +199,7 @@ async def verify_password(share_id: str, password: str = Form(...),
        or not pwd_context.verify(password, target.password_hash):
         html = render(
             "password-prompt.html",
+            **site_context(),
             video_name=display_name,
             share_id=share_id,
             error_message="Incorrect password. Please try again.",
