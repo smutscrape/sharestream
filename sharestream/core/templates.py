@@ -10,11 +10,14 @@ from urllib.parse import quote_plus
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from sharestream.services.markdown import render_markdown
+
 JINJA_ENV = Environment(
     loader=FileSystemLoader("static"),
     autoescape=select_autoescape(["html", "xml"]),
 )
 JINJA_ENV.filters['urlencode'] = quote_plus
+JINJA_ENV.filters['markdown'] = render_markdown
 
 # Backwards-compatible accessor: TEMPLATES("file.html") -> Template
 TEMPLATES = JINJA_ENV.get_template

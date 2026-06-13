@@ -96,6 +96,10 @@ SMTP_PASS = CONTACT_FORM_CONFIG.get('pass', '')
 SHARES_DIR = Path("data/shares")
 SHARES_DIR.mkdir(parents=True, exist_ok=True)
 
+# Static Markdown pages served at /{slug} (e.g. data/pages/terms.md -> /terms).
+PAGES_DIR = Path("data/pages")
+PAGES_DIR.mkdir(parents=True, exist_ok=True)
+
 # ------------------------------------------------------------------
 # JWT / cookie signing key.
 # ------------------------------------------------------------------

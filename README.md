@@ -19,12 +19,15 @@ Built with FastAPI, Sharestream sits in front of your media server and exposes o
 - **Mobile‑friendly**: responsive layout that works across devices
 
 ### Short, clean URLs
-Shares live at memorable top‑level paths:
+Shares and static site pages live at memorable top‑level paths:
 - Individual video: `https://yourdomain/{slug}` (random token or a custom slug)
 - Collection: `https://yourdomain/{tag}`
 - A video within a collection: `https://yourdomain/{tag}/{id}`
+- Static page: `https://yourdomain/{slug}` (from `data/pages/{slug}.md` — e.g. `data/pages/community.md` → `/community`)
 
-Legacy `/share/...` and `/tag/.../video/...` links keep working, so previously shared links continue to function.
+Legacy `/share/...` and `/tag/.../video/...` links keep working, so previously shared links continue to function. Old `/pages/{slug}` URLs permanently redirect to the top‑level path.
+
+Custom share IDs and static page slugs share the same namespace — the admin panel rejects a share slug that collides with an existing page file (and vice versa: don't add a page file whose name matches an existing share).
 
 ### Collection sharing
 Share groups of videos with a single link:
@@ -36,6 +39,9 @@ Share groups of videos with a single link:
 ### Public gallery
 - Optional curated homepage for featured content (opt‑in per share via "Feature on Home?")
 - Sort by **Date** (default), Title (A→Z), Play Count, Rating, or Random — consistent across the homepage and collection galleries
+- **Configurable default sort** in `config.yaml`; individual collection shares can override it in the admin panel
+- **Aggregate play counts** per video (summed across every share context) shown on cards and used for "Play Count" sorting
+- **Duration badges** on video cards (compact runtime in the bottom‑right corner)
 - Lazy‑loading thumbnails and hover‑to‑animate previews
 
 ## Key Features
@@ -50,7 +56,9 @@ Share groups of videos with a single link:
 | **Secure Sharing** | Optional per‑share passwords and expiring links |
 | **Resolution Control** | Choose streaming quality: LOW, MEDIUM, or HIGH |
 | **Access Safety Net** | Optional `limit_to_tag` so public tag shares only surface explicitly‑approved videos |
-| **View Tracking** | Anonymous view counting for basic analytics |
+| **View Tracking** | Anonymous view counting; play counts are aggregated per video across all share contexts |
+| **Static Pages** | Markdown files in `data/pages/` rendered as HTML at top‑level `/{slug}` URLs |
+| **Markdown Descriptions** | Video descriptions from Stash render as formatted Markdown on the player page |
 | **Contact / Takedown Form** | Built‑in DMCA‑style request form that emails you |
 
 ## Installation & Setup
@@ -72,7 +80,7 @@ cd sharestream
 
 Using mamba (recommended):
 ```bash
-mamba create -n sharestream python=3.12 fastapi uvicorn httpx pyyaml sqlalchemy pydantic python-jose cryptography passlib bcrypt jinja2 python-multipart
+mamba create -n sharestream python=3.12 fastapi uvicorn httpx pyyaml sqlalchemy pydantic python-jose cryptography passlib bcrypt jinja2 python-multipart markdown bleach
 mamba activate sharestream
 ```
 
@@ -105,6 +113,7 @@ sharestream:
   admin_password: "your_secure_password"
   default_resolution: MEDIUM
   share_id_length: 5                          # length of auto‑generated share tokens
+  default_sort: date                          # optional: date | title | hits | rating | random
 
 stash:
   server_ip: "127.0.0.1"
@@ -139,6 +148,7 @@ disclaimer: "This content is shared for private use only. Unauthorized distribut
 - **Logo**: `logo.svg` is preferred (crisp, tiny, no flash). PNGs (`logo.png` + optional `logo@2x.png`/`logo@3x.png`) also work.
 - **Favicon**: `favicon.ico`/`favicon.png` (a themed default is generated if you don't provide one).
 - **Fonts**: drop a `.woff2` into `static/localized/fonts/` named `base_font.woff2`, `title_font.woff2`, `button_font.woff2`, `motto_font.woff2`, or `disclaimer_font.woff2` to override that slot. No CSS editing — and no 404s for slots you leave empty. Defaults are clean web fonts (Inter for body, Chakra Petch for titles/buttons).
+- **Static pages**: add Markdown files to `data/pages/` (created automatically on first run). A file `terms.md` is served at `/terms`. Use lowercase filenames; the first `# Heading` becomes the page title. Legacy `/pages/terms` redirects to `/terms`.
 
 5. **Run the server** (from the project root, so the relative `config.yaml`, `static/`, `data/`, and database paths resolve):
 ```bash
@@ -165,11 +175,11 @@ Access the admin panel at `https://yourdomain/__admin`.
 ### Sharing a collection
 1. Enter a tag name and click "Lookup" to verify it exists
 2. Choose share ID type — **Random**, **Use Tag Name**, or **Custom**
-3. Configure resolution, password, embed mode, and "Feature on Home?"
+3. Configure resolution, password, embed mode, default sort, and "Feature on Home?"
 4. **Reorder** collections any time by dragging their rows in the Shared Collections list
 
 ### Managing shares
-- **Full editing** of existing video *and* collection shares (name, expiry, resolution, password, gallery flag, embed mode) — no need to delete and recreate
+- **Full editing** of existing video *and* collection shares (name, expiry, resolution, password, gallery flag, embed mode, default sort for collections) — no need to delete and recreate
 - Password handling on edit: leave blank to keep the existing one, or tick "Remove password"
 - **Real‑time stats**: view counts and relative expiration times
 - **Quick actions**: copy, edit, delete; bulk refresh; **Clear Cache** (drops the cached tag→video membership sets — use it right after retagging items in Stash so a collection reflects the change without waiting out the TTL)
@@ -181,14 +191,15 @@ Access the admin panel at `https://yourdomain/__admin`.
 - Player box auto‑fits the viewport at the video's native aspect ratio (read from the source up front, so portrait videos render correctly on first paint)
 - Rounded corners, frosted controls
 - Full metadata, identical for individual and collection videos:
-  - Statistics (views, rating, date)
+  - Statistics (aggregate views across all share contexts, rating, date)
   - Performers/contributors with website and social links
-  - Studio/source, tags (the `limit_to_tag` tag is hidden), description, external URLs, duration, resolution
+  - Studio/source, tags (the `limit_to_tag` tag is hidden), **Markdown‑formatted description**, external URLs, duration, resolution
 - Password protection via a styled modal
 
 ### Gallery
 - Hover a card to play an animated preview
 - Collection cards cycle through animated previews of their contents
+- Play count and duration overlays on each video card
 - Lazy‑loaded thumbnails, sort controls, responsive grid
 
 ## Social Embeds
@@ -234,7 +245,8 @@ The mental model: `limit_to_tag` is your curation boundary for anything a strang
 3. **Fonts**: drop‑in `.woff2` per slot, or use the bundled web‑font defaults
 4. **Visitor notice**: optional frosted‑glass acknowledgement / age gate
 5. **Disclaimer, motto, social links**: all configurable
-6. **Gallery**: curate your public homepage per share
+6. **Gallery**: curate your public homepage per share; set the site‑wide default sort in config and override per collection in the admin panel
+7. **Static pages**: Markdown files in `data/pages/` for terms, community info, or any other standalone content — served at `/{slug}` with the same site chrome as the rest of the site
 
 
 ## Troubleshooting
@@ -266,6 +278,11 @@ Those are served live (no restart needed) — hard‑refresh and purge your CDN.
 
 ## Recent Updates
 
+- **Static Markdown pages** at top‑level `/{slug}` from `data/pages/{slug}.md`, with legacy `/pages/{slug}` redirects
+- **Markdown video descriptions** on the player page (headings, lists, links, code blocks, etc.)
+- **Aggregate play counts** per video across all share contexts, used consistently on cards, galleries, and the player page
+- **Duration badges** on gallery cards
+- **Configurable default sort** (`sharestream.default_sort` in config; per‑collection override in the admin panel)
 - **Fully async upstream I/O**: all source calls now use `httpx.AsyncClient` (a shared, pooled, non‑blocking client) instead of synchronous `requests`, so concurrent viewers' requests no longer serialize on the event loop
 - **Tag‑membership caching**: media requests cache the tag→video‑ID set (TTL via `cache.tag_membership_ttl_minutes`, default 15 min) instead of re‑querying the source on every hit, with a **Clear Cache** button in the admin panel
 - **Private cached artifacts**: cached thumbnails and playlists moved out of the public static directory and served through gated routes

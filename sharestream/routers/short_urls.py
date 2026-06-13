@@ -6,7 +6,8 @@ Custom slugs are validated against RESERVED_SLUGS at creation time, so a slug
 can never permanently shadow (or be shadowed by) a real route.
 
     /{tag}/{video_id}  -> a specific video inside a shared tag
-    /{slug}            -> an individual video share, or a tag share's gallery
+    /{slug}            -> an individual video share, a tag share's gallery, or
+                          a static Markdown page (data/pages/{slug}.md)
 
 The legacy /share/... and /tag/... URLs still work, so existing links keep
 functioning; these just provide the shorter canonical forms.
@@ -19,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from sharestream.db.models import SharedTag, SharedVideo
 from sharestream.db.session import get_db
+from sharestream.routers.pages import render_markdown_page
 from sharestream.routers.shares import share_page
 from sharestream.routers.tags import tag_share_page, tag_video_page
 
@@ -48,4 +50,7 @@ async def short_share(slug: str, request: Request = None, db: Session = Depends(
                 page = 1
             sort = request.query_params.get('sort')
         return await tag_share_page(share_id=slug, request=request, page=page, sort=sort, db=db)
+    page = render_markdown_page(slug)
+    if page is not None:
+        return page
     raise HTTPException(status_code=404, detail="Not found")
