@@ -24,14 +24,26 @@ _ALLOWED_PROTOCOLS = ["http", "https", "mailto"]
 
 _TITLE_RE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
 _STRIP_LEADING_H1_RE = re.compile(r"^\s*#\s+.+?\s*(?:\r?\n|$)", re.MULTILINE)
+# GFM ~~strikethrough~~ (not part of Python-Markdown's ``extra`` bundle).
+_STRIKE_RE = re.compile(r"~~([^~\n]+?)~~")
+_CODE_SPAN_RE = re.compile(r"(`[^`\n]+`|```[\s\S]*?```)")
+
+
+def _apply_strikethrough(source: str) -> str:
+    """Convert ``~~text~~`` to ``<del>`` outside inline/fenced code spans."""
+    parts = _CODE_SPAN_RE.split(source)
+    for i in range(0, len(parts), 2):
+        parts[i] = _STRIKE_RE.sub(r"<del>\1</del>", parts[i])
+    return "".join(parts)
 
 
 def render_markdown(text: str | None) -> str:
     """Convert ``text`` from Markdown to sanitized HTML, or return '' when empty."""
     if not text or not str(text).strip():
         return ""
+    source = _apply_strikethrough(str(text))
     html = md.markdown(
-        str(text),
+        source,
         extensions=["extra", "sane_lists", "smarty"],
         output_format="html5",
     )
