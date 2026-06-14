@@ -171,7 +171,7 @@ async def share_page(share_id: str, request: Request = None, db: Session = Depen
     else:
         embed_video_url = f"{BASE_DOMAIN}/share/{share_id}/stream.mp4"
 
-    context = site_context()
+    context = site_context(request)
     context.update(
         video_name=video.video_name,
         share_id=share_id,

@@ -40,7 +40,7 @@ async def home(request: Request, sort: str | None = None, page: int = 1, db: Ses
 async def gallery_by_tag(tag_name: str, request: Request = None, db: Session = Depends(get_db)):
     tag_name = unquote_plus(tag_name)
     try:
-        context = await build_tag_name_gallery_context(db, tag_name)
+        context = await build_tag_name_gallery_context(db, tag_name, request=request)
         return HTMLResponse(content=render("gallery.html", **context))
     except HTTPException:
         # Let 404 (unknown tag) etc. propagate to the themed error page.

@@ -47,7 +47,7 @@ SHARE_ID_LENGTH = config['sharestream'].get('share_id_length', 8)
 # Default gallery sort mode for the home page and tag-share pages (the values the
 # sort dropdown offers). Individual tag shares can override it in the admin panel.
 # Falls back to 'date' when unset/invalid.
-VALID_SORTS = {'date', 'title', 'hits', 'rating', 'random'}
+VALID_SORTS = {'date', 'title', 'hits', 'rating', 'duration', 'random'}
 DEFAULT_SORT = str(config['sharestream'].get('default_sort', 'date')).strip().lower()
 if DEFAULT_SORT not in VALID_SORTS:
     DEFAULT_SORT = 'date'

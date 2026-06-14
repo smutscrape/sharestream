@@ -1,0 +1,22 @@
+{% if show_content_warning %}
+<div id="cw-overlay" class="cw-overlay">
+    <div class="cw-card">
+        <h2 class="cw-title">Content Warning</h2>
+        <p class="cw-message">{{ content_warning }}</p>
+        <button id="cw-enter" class="cw-enter" type="button">Enter</button>
+    </div>
+</div>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        var cwOverlay = document.getElementById('cw-overlay');
+        var cwEnter = document.getElementById('cw-enter');
+        if (!cwOverlay || !cwEnter) return;
+        cwEnter.addEventListener('click', function() {
+            document.cookie = 'content_warning_ack=1; max-age=' + (60 * 60 * 24 * 365) + '; path=/; samesite=lax';
+            cwOverlay.classList.add('cw-dismissed');
+            document.body.classList.remove('cw-locked');
+            setTimeout(function() { cwOverlay.remove(); }, 600);
+        });
+    });
+</script>
+{% endif %}

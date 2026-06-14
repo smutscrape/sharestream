@@ -50,7 +50,7 @@ async def short_share(slug: str, request: Request = None, db: Session = Depends(
                 page = 1
             sort = request.query_params.get('sort')
         return await tag_share_page(share_id=slug, request=request, page=page, sort=sort, db=db)
-    page = render_markdown_page(slug)
+    page = render_markdown_page(slug, request=request)
     if page is not None:
         return page
     raise HTTPException(status_code=404, detail="Not found")

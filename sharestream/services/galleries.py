@@ -22,7 +22,7 @@ from sharestream.backends.stash import (
     get_scene_meta,
     get_videos_by_tag,
 )
-from sharestream.config import CONTENT_WARNING, VALID_SORTS
+from sharestream.config import VALID_SORTS
 from sharestream.core.branding import site_context
 from sharestream.db.models import SharedTag, SharedVideo
 from sharestream.services.access import tag_share_respects_limit_tag
@@ -126,7 +126,7 @@ def sort_video_dicts(items, sort):
     """Sort a list of Stash video dicts IN PLACE by the given mode.
 
     'date' (default) -> newest first by release date, falling back to created_at;
-    'title' -> A→Z (normal alphabetical); 'hits'/'rating' -> highest first;
+    'title' -> A→Z (normal alphabetical); 'hits'/'rating'/'duration' -> highest/longest first;
     'random' -> shuffled.
     """
     if sort == 'title':
@@ -135,6 +135,8 @@ def sort_video_dicts(items, sort):
         items.sort(key=lambda v: v.get('hits') or 0, reverse=True)
     elif sort == 'rating':
         items.sort(key=lambda v: v.get('rating') or 0, reverse=True)
+    elif sort == 'duration':
+        items.sort(key=lambda v: v.get('duration') or 0, reverse=True)
     elif sort == 'random':
         random.shuffle(items)
     else:  # 'date' (default)
@@ -233,6 +235,7 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
             "thumbnail_url": None,  # Will be lazy loaded
             "lazy_thumbnail_url": f"/share/{video.share_id}/thumbnail.jpg",
             "hits": total_plays.get(video.stash_video_id, 0),
+            "duration": m.get("duration") or 0,
             "duration_label": format_duration(m.get("duration")),
             "stash_video_id": video.stash_video_id,
             "rating": m.get("rating") or 0,
@@ -254,6 +257,7 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
                 "thumbnail_url": None,  # Will be lazy loaded
                 "lazy_thumbnail_url": f"/tag/{tag_share_id}/thumbnail/{video_id}",
                 "hits": total_plays.get(video_id, 0),
+                "duration": video_data.get("duration") or 0,
                 "duration_label": format_duration(video_data.get("duration")),
                 "stash_video_id": video_id,
                 "rating": video_data.get("rating", 0) or 0,
@@ -267,6 +271,8 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
         all_video_cards.sort(key=lambda v: v.get('hits') or 0, reverse=True)
     elif sort == 'rating':
         all_video_cards.sort(key=lambda v: v.get('rating') or 0, reverse=True)
+    elif sort == 'duration':
+        all_video_cards.sort(key=lambda v: v.get('duration') or 0, reverse=True)
     elif sort == 'random':
         random.shuffle(all_video_cards)
     else:  # 'date' (default) — newest first by release date, else created_at
@@ -302,13 +308,7 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
     logger.info(f"Home page rendering: {len(tag_cards)} tag collections, "
                 f"{len(all_video_cards)} of {total_videos} videos shown")
 
-    # Show the content warning only when configured AND the visitor hasn't
-    # already acknowledged it (cookie set client-side on "Enter").
-    show_content_warning = bool(CONTENT_WARNING) and not (
-        request and request.cookies.get("content_warning_ack")
-    )
-
-    context = site_context()
+    context = site_context(request)
     context.update(
         tag_cards=tag_cards,
         all_video_cards=all_video_cards,  # Use the new combined and sorted list
@@ -319,15 +319,13 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
         has_next_page=has_more_pages,
         prev_page_url=f"/?page={page-1}&sort={sort}" if page > 1 else None,
         next_page_url=f"/?page={page+1}&sort={sort}" if has_more_pages else None,
-        content_warning=CONTENT_WARNING,
-        show_content_warning=show_content_warning,
         sort=sort,
     )
     return context
 
 
 async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id: str,
-                                    page: int = 1, sort: str = 'date') -> dict:
+                                    page: int = 1, sort: str = 'date', request=None) -> dict:
     """Assemble the paginated gallery context for a single tag share's page."""
     # Set pagination parameters
     per_page = GALLERY_PAGE_SIZE  # videos per page
@@ -407,7 +405,7 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
 
     await _warm_thumbnails(warm_coros)
 
-    context = site_context()
+    context = site_context(request)
     context.update(
         video_cards=video_cards,
         current_page=page,
@@ -423,7 +421,7 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
     return context
 
 
-async def build_tag_name_gallery_context(db: Session, tag_name: str) -> dict:
+async def build_tag_name_gallery_context(db: Session, tag_name: str, request=None) -> dict:
     """Assemble the ``/gallery/tag/{name}`` context: public shares whose videos
     carry the requested tag. Raises 404 if the tag is unknown to Stash."""
     # 1. Find tag_id from Stash
@@ -516,7 +514,7 @@ async def build_tag_name_gallery_context(db: Session, tag_name: str) -> dict:
     total_videos = len(video_cards)
     logger.info(f"Rendering gallery for tag '{tag_name}' with {total_videos} videos.")
 
-    context = site_context()
+    context = site_context(request)
     context.update(
         tag_name=tag_name,
         video_cards=video_cards,

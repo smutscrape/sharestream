@@ -49,7 +49,7 @@ class SharedTag(Base):
     show_in_gallery = Column(Boolean, default=False)
     embed_mode = Column(String, nullable=True)  # preview | full | dynamic | None(=config default)
     sort_order = Column(Integer, default=0)  # display order for the home "Collections" row & admin list
-    default_sort = Column(String, nullable=True)  # date|title|hits|rating|random | None(=config default)
+    default_sort = Column(String, nullable=True)  # date|title|hits|rating|duration|random | None(=config default)
 
 
 class TagVideoHit(Base):

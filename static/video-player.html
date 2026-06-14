@@ -89,7 +89,8 @@
     <script src="/static/emoji-fix.js" defer></script>
     <script src="/static/metadata-masonry.js" defer></script>
 </head>
-<body>
+<body{% if show_content_warning %} class="cw-locked"{% endif %}>
+    {% include "content-warning.html" %}
     <div class="container">
         <a href="{{ base_domain }}" class="video-logo-link">
             <img src="{{ logo_path }}" srcset="{{ srcset }}" alt="Logo" class="logo">

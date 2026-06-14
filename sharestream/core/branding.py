@@ -12,6 +12,7 @@ from pathlib import Path
 
 from sharestream.config import (
     BASE_DOMAIN,
+    CONTENT_WARNING,
     DISCLAIMER,
     FOOTER,
     SITE_MOTTO,
@@ -93,7 +94,21 @@ def build_fonts_css() -> str:
     return "\n".join(blocks)
 
 
-def site_context() -> dict:
+def content_warning_context(request=None) -> dict:
+    """Return content-warning template vars for browsable pages.
+
+    Pass the incoming ``Request`` so the overlay is suppressed after the
+    visitor clicks Enter (``content_warning_ack`` cookie). When ``request`` is
+    omitted the overlay stays off — used for admin, embed, and error pages.
+    """
+    show = bool(request and CONTENT_WARNING and not request.cookies.get("content_warning_ack"))
+    return {
+        "content_warning": CONTENT_WARNING,
+        "show_content_warning": show,
+    }
+
+
+def site_context(request=None) -> dict:
     """Common template variables shared by every themed page (logo, site name,
     motto, social links, base domain, disclaimer)."""
     logo_path, srcset = resolve_logo()
@@ -107,4 +122,5 @@ def site_context() -> dict:
         "disclaimer": DISCLAIMER,
         "footer_action_links": FOOTER["action_links"],
         "footer_inline_links": FOOTER["links"],
+        **content_warning_context(request),
     }

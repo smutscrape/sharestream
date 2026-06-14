@@ -11,15 +11,7 @@
     <link rel="apple-touch-icon" href="/favicon.png">
 </head>
 <body{% if show_content_warning %} class="cw-locked"{% endif %}>
-    {% if show_content_warning %}
-    <div id="cw-overlay" class="cw-overlay">
-        <div class="cw-card">
-            <h2 class="cw-title">Content Warning</h2>
-            <p class="cw-message">{{ content_warning }}</p>
-            <button id="cw-enter" class="cw-enter" type="button">Enter</button>
-        </div>
-    </div>
-    {% endif %}
+    {% include "content-warning.html" %}
     <div class="container">
         <header>
             <a href="{{ base_domain }}">
@@ -66,6 +58,7 @@
                 <option value="title" {% if sort == 'title' %}selected{% endif %}>Title</option>
                 <option value="hits" {% if sort == 'hits' %}selected{% endif %}>Play Count</option>
                 <option value="rating" {% if sort == 'rating' %}selected{% endif %}>Rating</option>
+                <option value="duration" {% if sort == 'duration' %}selected{% endif %}>Duration</option>
                 <option value="random" {% if sort == 'random' %}selected{% endif %}>Random</option>
             </select>
         </div>
@@ -137,18 +130,6 @@
     
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // Content warning: dismiss + remember on "Enter"
-            const cwOverlay = document.getElementById('cw-overlay');
-            const cwEnter = document.getElementById('cw-enter');
-            if (cwOverlay && cwEnter) {
-                cwEnter.addEventListener('click', function() {
-                    document.cookie = 'content_warning_ack=1; max-age=' + (60 * 60 * 24 * 365) + '; path=/; samesite=lax';
-                    cwOverlay.classList.add('cw-dismissed');
-                    document.body.classList.remove('cw-locked');
-                    setTimeout(function() { cwOverlay.remove(); }, 600);
-                });
-            }
-
             // Sorting dropdown logic
             const sortSelect = document.getElementById('sort-select');
             if (sortSelect) {

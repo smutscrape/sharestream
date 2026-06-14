@@ -217,7 +217,8 @@ async def tag_share_page(share_id: str, request: Request = None, page: int = 1, 
     # configured default sort, falling back to the global config default.
     effective_sort = normalize_sort(sort) or normalize_sort(tag_share.default_sort) or DEFAULT_SORT
 
-    context = await build_tag_gallery_context(db, tag_share, share_id, page=page, sort=effective_sort)
+    context = await build_tag_gallery_context(db, tag_share, share_id, page=page, sort=effective_sort,
+                                             request=request)
     return HTMLResponse(render("gallery.html", **context))
 
 
@@ -268,7 +269,7 @@ async def tag_video_page(share_id: str, video_id: int, request: Request = None,
     else:
         embed_video_url = f"{BASE_DOMAIN}/tag/{share_id}/video/{video_id}/stream.mp4"
 
-    context = site_context()
+    context = site_context(request)
     context.update(
         video_name=video_details.get("title") or "Video",
         share_id=composite_id,  # This maps to the m3u8 URL

@@ -27,7 +27,7 @@ class ShareTagRequest(BaseModel):
     show_in_gallery: bool = False
     custom_share_id: str | None = None
     embed_mode: str | None = None
-    default_sort: str | None = None  # date|title|hits|rating|random | None(=config default)
+    default_sort: str | None = None  # date|title|hits|rating|duration|random | None(=config default)
     clear_password: bool = False
 
 
