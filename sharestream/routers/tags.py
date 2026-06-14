@@ -38,7 +38,8 @@ async def lookup_tag(tag_name: str, current_user: str = Depends(get_current_user
     """Lookup a tag and return info about it"""
     tag_name = unquote_plus(tag_name)
     try:
-        videos, tag_info = await get_videos_by_tag_name(tag_name)
+        # Admin lookup shows full tag membership; limit_to_tag applies at display time.
+        videos, tag_info = await get_videos_by_tag_name(tag_name, respect_limit_tag=False)
 
         if not tag_info:
             raise HTTPException(status_code=404, detail=f"Tag '{tag_name}' not found")
@@ -65,7 +66,7 @@ async def share_tag(request: ShareTagRequest,
 
     # Verify the tag exists and has videos using the provided tag_id
     try:
-        videos, _ = await get_videos_by_tag(request.tag_id)
+        videos, _ = await get_videos_by_tag(request.tag_id, respect_limit_tag=False)
 
         if not videos:
             logger.warning(f"No videos found for tag ID {request.tag_id}")

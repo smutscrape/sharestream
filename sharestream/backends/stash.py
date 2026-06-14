@@ -424,7 +424,8 @@ async def tag_contains_scene(tag_id: str, video_id: int, respect_limit_tag: bool
         return None
 
 
-async def get_videos_by_tag_name(tag_name: str, page: int = 1, per_page: int = 1000) -> tuple[list, dict | None]:
+async def get_videos_by_tag_name(tag_name: str, page: int = 1, per_page: int = 1000,
+                                 respect_limit_tag: bool = True) -> tuple[list, dict | None]:
     """Get videos by tag name - returns (videos, tag_info)"""
     logger.debug(f"Getting videos by tag name: {tag_name}")
 
@@ -433,7 +434,9 @@ async def get_videos_by_tag_name(tag_name: str, page: int = 1, per_page: int = 1
         logger.warning(f"Tag '{tag_name}' not found")
         return [], None
 
-    videos, total_count = await get_videos_by_tag(tag_info["id"], page, per_page)
+    videos, total_count = await get_videos_by_tag(
+        tag_info["id"], page, per_page, respect_limit_tag=respect_limit_tag
+    )
     logger.info(f"Retrieved {len(videos)} videos for tag '{tag_name}' (ID: {tag_info['id']})")
     return videos, tag_info
 
