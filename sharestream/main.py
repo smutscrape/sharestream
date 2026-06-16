@@ -10,6 +10,7 @@ short-URL routes, which are included LAST.
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,8 +37,14 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    await close_http_client()
+
+
 def create_app() -> FastAPI:
-    app = FastAPI()
+    app = FastAPI(lifespan=lifespan)
 
     # CORS
     app.add_middleware(
@@ -69,9 +76,6 @@ def create_app() -> FastAPI:
     app.include_router(pages.router)
     app.include_router(public.router)
     app.include_router(short_urls.router)  # MUST be included last
-
-    # Cleanly close the shared HTTP client on shutdown.
-    app.add_event_handler("shutdown", close_http_client)
 
     return app
 
