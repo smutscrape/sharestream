@@ -11,24 +11,28 @@
     <link rel="icon" type="image/png" href="/favicon.png">
     <link rel="apple-touch-icon" href="/favicon.png">
     <style>
-        /* Let the card grow with its staged-file list instead of clipping it
-           (the base .admin-section sets overflow:hidden, which would hide the
-           per-file inputs and the Upload button below the fold). */
+        /* admin.css (loaded for the shared panel styling) pins .container to a
+           fixed height:100vh with overflow hidden — meant for the admin SPA's
+           fixed panes. On this scrolling page that clips anything past the fold
+           (the bug where the save button vanished at some zoom levels). Restore
+           normal document flow + scrolling for the filedrop page only. */
+        html, body { height: auto; min-height: 100%; overflow: auto; }
+        .container { height: auto !important; min-height: calc(100vh - 60px); overflow: visible !important; }
         .filedrop-section { max-width: 640px; margin: 0 auto; overflow: visible; }
         .dropzone {
             border: 2px dashed rgba(255, 0, 128, 0.5);
             border-radius: 12px;
-            padding: 48px 24px;
+            padding: 28px 24px;   /* ~25% shorter than before to leave room below */
             text-align: center;
             cursor: pointer;
             transition: background 0.2s, border-color 0.2s;
             background: rgba(255, 0, 128, 0.05);
         }
         .dropzone.dragover { background: rgba(255, 0, 128, 0.15); border-color: #ff2a6d; }
-        .dropzone p { margin: 8px 0; color: #c8b3d4; }
+        .dropzone p { margin: 6px 0; color: #c8b3d4; }
         .dropzone .hint { font-size: 0.85rem; opacity: 0.7; }
         #file-input { display: none; }
-        .upload-list { list-style: none; padding: 0; margin: 24px 0 0; }
+        .upload-list { list-style: none; padding: 0; margin: 20px 0 0; }
         .upload-item {
             background: rgba(20, 10, 30, 0.6);
             border-radius: 8px;
@@ -50,9 +54,11 @@
         }
         .upload-item textarea { resize: vertical; min-height: 48px; }
         .upload-item input:focus, .upload-item textarea:focus { outline: none; border-color: #ff2a6d; }
-        .upload-actions { margin-top: 16px; display: flex; gap: 12px; align-items: center; }
-        .upload-actions button { padding: 10px 20px; }
-        .upload-actions button[disabled] { opacity: 0.5; cursor: not-allowed; }
+        .detail-row { margin-top: 10px; display: flex; gap: 10px; align-items: center; }
+        .detail-row button { padding: 8px 16px; white-space: nowrap; }
+        .detail-row button[disabled] { opacity: 0.5; cursor: not-allowed; }
+        .save-note { font-size: 0.8rem; opacity: 0.75; }
+        .save-note.saved { color: #4ade80; }
     </style>
 </head>
 <body>
@@ -80,7 +86,7 @@
         {% else %}
         <div class="admin-section filedrop-section">
             <h2>Upload Files</h2>
-            <p style="color:#c8b3d4; margin-bottom:20px;">Drop video files below to add them to the collection.</p>
+            <p style="color:#c8b3d4; margin-bottom:16px;">Drop video files below — uploading starts right away. Add a title &amp; description while they process.</p>
             <div class="dropzone" id="dropzone">
                 <p><strong>Drag &amp; drop</strong> files here</p>
                 <p class="hint">or click to choose &middot; max {{ max_upload_mb }} MB each</p>
@@ -88,10 +94,6 @@
             </div>
             <input type="file" id="file-input" multiple accept="video/*">
             <ul class="upload-list" id="upload-list"></ul>
-            <div class="upload-actions" id="upload-actions" style="display:none;">
-                <button type="button" id="upload-button">Upload</button>
-                <span class="hint">Edit titles &amp; descriptions, then upload.</span>
-            </div>
         </div>
         {% endif %}
 
@@ -104,22 +106,16 @@
             const dropzone = document.getElementById('dropzone');
             const fileInput = document.getElementById('file-input');
             const list = document.getElementById('upload-list');
-            const actions = document.getElementById('upload-actions');
-            const uploadButton = document.getElementById('upload-button');
             const MAX_MB = {{ max_upload_mb }};
             const ALLOWED = {{ allowed_exts | tojson }};
-
-            // Staged files awaiting upload: { file, els:{...}, done:false }.
-            const staged = [];
 
             dropzone.addEventListener('click', () => fileInput.click());
             ['dragenter', 'dragover'].forEach(ev =>
                 dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.add('dragover'); }));
             ['dragleave', 'drop'].forEach(ev =>
                 dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('dragover'); }));
-            dropzone.addEventListener('drop', e => stageFiles(e.dataTransfer.files));
-            fileInput.addEventListener('change', () => stageFiles(fileInput.files));
-            uploadButton.addEventListener('click', uploadAll);
+            dropzone.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
+            fileInput.addEventListener('change', () => handleFiles(fileInput.files));
 
             function extOf(name) {
                 const i = name.lastIndexOf('.');
@@ -130,114 +126,122 @@
                 return i > 0 ? name.slice(0, i) : name;
             }
 
-            // Add each chosen file as an editable card (title pre-filled with the
-            // filename minus extension; description optional). Nothing uploads
-            // until the Upload button is pressed.
-            function stageFiles(files) {
+            // Uploads start IMMEDIATELY when files are chosen/dropped. The title
+            // defaults server-side to the filename; the title/description fields
+            // appear once upload completes so the uploader can refine them and
+            // press "Save details" (which patches the already-created scene).
+            // One upload runs at a time so we don't saturate SFTP / Stash scans.
+            let chain = Promise.resolve();
+            function handleFiles(files) {
                 for (const file of files) {
-                    const li = document.createElement('li');
-                    li.className = 'upload-item';
-                    li.innerHTML = `
-                        <div class="name"></div>
+                    const card = makeCard(file);
+                    if (card.rejected) continue;
+                    chain = chain.then(() => uploadOne(file, card));
+                }
+                fileInput.value = '';
+            }
+
+            function makeCard(file) {
+                const li = document.createElement('li');
+                li.className = 'upload-item';
+                li.innerHTML = `
+                    <div class="name"></div>
+                    <div class="progress-track"><div class="progress-bar"></div></div>
+                    <div class="status">Queued…</div>
+                    <div class="details" style="display:none;">
                         <label>Title</label>
                         <input type="text" class="title-input">
                         <label>Description (optional)</label>
                         <textarea class="desc-input" rows="2"></textarea>
-                        <div class="progress-track"><div class="progress-bar"></div></div>
-                        <div class="status">Ready to upload</div>`;
-                    li.querySelector('.name').textContent = file.name;
-                    li.querySelector('.title-input').value = stripExt(file.name);
-                    list.appendChild(li);
-
-                    const entry = {
-                        file,
-                        done: false,
-                        els: {
-                            li,
-                            title: li.querySelector('.title-input'),
-                            desc: li.querySelector('.desc-input'),
-                            bar: li.querySelector('.progress-bar'),
-                            status: li.querySelector('.status'),
-                        },
-                    };
-
-                    // Client-side validation surfaced immediately on the card.
-                    if (!ALLOWED.includes(extOf(file.name))) {
-                        markError(entry, 'Rejected: file type not allowed'); entry.done = true;
-                    } else if (file.size > MAX_MB * 1024 * 1024) {
-                        markError(entry, `Rejected: exceeds ${MAX_MB} MB`); entry.done = true;
-                    }
-                    staged.push(entry);
+                        <div class="detail-row">
+                            <button type="button" class="save-button">Save details</button>
+                            <span class="save-note"></span>
+                        </div>
+                    </div>`;
+                li.querySelector('.name').textContent = file.name;
+                list.appendChild(li);
+                const card = {
+                    li,
+                    bar: li.querySelector('.progress-bar'),
+                    status: li.querySelector('.status'),
+                    details: li.querySelector('.details'),
+                    title: li.querySelector('.title-input'),
+                    desc: li.querySelector('.desc-input'),
+                    saveBtn: li.querySelector('.save-button'),
+                    saveNote: li.querySelector('.save-note'),
+                    rejected: false,
+                };
+                card.title.value = stripExt(file.name);
+                if (!ALLOWED.includes(extOf(file.name))) {
+                    fail(card, 'Rejected: file type not allowed'); card.rejected = true;
+                } else if (file.size > MAX_MB * 1024 * 1024) {
+                    fail(card, `Rejected: exceeds ${MAX_MB} MB`); card.rejected = true;
                 }
-                fileInput.value = '';
-                actions.style.display = staged.some(e => !e.done) ? 'flex' : 'none';
+                return card;
             }
 
-            function markError(entry, msg) {
-                entry.els.status.textContent = msg;
-                entry.els.status.className = 'status error';
+            function fail(card, msg) {
+                card.status.textContent = msg;
+                card.status.className = 'status error';
             }
 
-            async function uploadAll() {
-                uploadButton.disabled = true;
-                // Sequential, so we don't saturate the SFTP link or Stash scans.
-                for (const entry of staged) {
-                    if (entry.done) continue;
-                    await uploadOne(entry);
-                    entry.done = true;
-                }
-                uploadButton.disabled = false;
-                if (!staged.some(e => !e.done)) actions.style.display = 'none';
-            }
-
-            function uploadOne(entry) {
+            function uploadOne(file, card) {
                 return new Promise(resolve => {
-                    const { file, els } = entry;
-                    els.title.disabled = true;
-                    els.desc.disabled = true;
                     const fd = new FormData();
                     fd.append('file', file, file.name);
-                    fd.append('title', els.title.value.trim());
-                    fd.append('description', els.desc.value.trim());
                     const xhr = new XMLHttpRequest();
                     xhr.open('POST', '/filedrop/upload');
                     xhr.upload.addEventListener('progress', e => {
                         if (e.lengthComputable) {
                             const pct = Math.round((e.loaded / e.total) * 100);
-                            els.bar.style.width = pct + '%';
-                            els.status.textContent = pct < 100 ? `Uploading ${pct}%` : 'Processing on server…';
+                            card.bar.style.width = pct + '%';
+                            card.status.textContent = pct < 100 ? `Uploading ${pct}%` : 'Processing on server…';
                         }
                     });
                     xhr.addEventListener('load', () => {
                         if (xhr.status >= 200 && xhr.status < 300) {
                             let data = {};
                             try { data = JSON.parse(xhr.responseText); } catch (e) {}
-                            els.bar.style.width = '100%';
-                            if (data.status === 'done') {
-                                els.status.textContent = data.tagged
-                                    ? `Done — added to Stash (scene #${data.scene_id}, tagged)`
-                                    : `Done — added to Stash (scene #${data.scene_id})`;
-                            } else {
-                                els.status.textContent = 'Uploaded — Stash is still processing it';
+                            card.bar.style.width = '100%';
+                            card.sceneId = data.scene_id;
+                            card.status.textContent = data.status === 'done'
+                                ? `Added to Stash (scene #${data.scene_id}${data.tagged ? ', tagged' : ''})`
+                                : 'Uploaded — Stash is still processing it';
+                            card.status.className = 'status done';
+                            // Reveal the title/description editor now that a scene exists.
+                            if (data.scene_id) {
+                                card.details.style.display = 'block';
+                                wireSave(card);
                             }
-                            els.status.className = 'status done';
                         } else {
                             let msg = `Failed (${xhr.status})`;
                             try { msg = JSON.parse(xhr.responseText).detail || msg; } catch (e) {}
-                            els.status.textContent = msg;
-                            els.status.className = 'status error';
-                            els.title.disabled = false;
-                            els.desc.disabled = false;
+                            fail(card, msg);
                         }
                         resolve();
                     });
-                    xhr.addEventListener('error', () => {
-                        markError(entry, 'Network error');
-                        els.title.disabled = false;
-                        els.desc.disabled = false;
-                        resolve();
-                    });
+                    xhr.addEventListener('error', () => { fail(card, 'Network error'); resolve(); });
                     xhr.send(fd);
+                });
+            }
+
+            function wireSave(card) {
+                card.saveBtn.addEventListener('click', () => {
+                    card.saveBtn.disabled = true;
+                    card.saveNote.textContent = 'Saving…';
+                    card.saveNote.className = 'save-note';
+                    const fd = new FormData();
+                    fd.append('scene_id', card.sceneId);
+                    fd.append('title', card.title.value.trim());
+                    fd.append('description', card.desc.value.trim());
+                    fetch('/filedrop/details', { method: 'POST', body: fd })
+                        .then(r => {
+                            if (!r.ok) throw new Error('HTTP ' + r.status);
+                            card.saveNote.textContent = 'Saved';
+                            card.saveNote.className = 'save-note saved';
+                        })
+                        .catch(() => { card.saveNote.textContent = 'Save failed'; card.saveNote.className = 'save-note'; })
+                        .finally(() => { card.saveBtn.disabled = false; });
                 });
             }
         })();

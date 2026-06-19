@@ -23,6 +23,7 @@ from sharestream.config import (
     FILEDROP_MAX_UPLOAD_MB,
     FILEDROP_PASSWORD,
 )
+from sharestream.backends.stash import update_scene_metadata
 from sharestream.core.branding import site_context
 from sharestream.core.templates import render
 from sharestream.services import access
@@ -137,3 +138,21 @@ async def filedrop_upload(request: Request, file: UploadFile,
         "scene_id": outcome.get("scene_id"),
         "tagged": outcome.get("tagged", False),
     })
+
+
+@router.post("/filedrop/details")
+async def filedrop_details(request: Request, scene_id: int = Form(...),
+                           title: str = Form(""), description: str = Form("")):
+    """Update a just-uploaded scene's title/description.
+
+    The upload starts immediately on drop (with the title defaulted to the
+    filename), so this lets the uploader refine the title and add a description
+    afterwards without re-uploading. Blank fields are left unchanged on Stash."""
+    _require_enabled()
+    if not access.filedrop_access_ok(request, FILEDROP_PASSWORD):
+        raise HTTPException(status_code=403, detail="Password required")
+    ok = await update_scene_metadata(scene_id, title=title.strip() or None,
+                                     details=description.strip() or None)
+    if not ok:
+        raise HTTPException(status_code=502, detail="Failed to update scene details")
+    return JSONResponse({"scene_id": scene_id, "saved": True})
