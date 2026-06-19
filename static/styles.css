@@ -985,6 +985,14 @@ td a:hover {
     margin-bottom: 0;
 }
 
+/* Embedded images never exceed the bounds of their container, and scale down
+   proportionally on narrow viewports. height:auto preserves aspect ratio when a
+   width attribute is present on the <img>. */
+.markdown-body img {
+    max-width: 100%;
+    height: auto;
+}
+
 .markdown-body p,
 .markdown-body ul,
 .markdown-body ol,

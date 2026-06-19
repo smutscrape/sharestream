@@ -105,6 +105,7 @@ async def share_tag(request: ShareTagRequest,
             show_in_gallery=request.show_in_gallery,
             embed_mode=normalize_embed_mode(request.embed_mode),
             default_sort=normalize_sort(request.default_sort),
+            apply_limit_tag=request.apply_limit_tag,
             sort_order=max_order + 1
         )
         db.add(shared_tag)
@@ -152,6 +153,8 @@ async def edit_tag_share(share_id: str, request: ShareTagRequest,
             tag.embed_mode = normalize_embed_mode(request.embed_mode)
         if 'default_sort' in request.model_fields_set:
             tag.default_sort = normalize_sort(request.default_sort)
+        if 'apply_limit_tag' in request.model_fields_set:
+            tag.apply_limit_tag = request.apply_limit_tag
         db.commit()
 
         # Drop cached per-video playlists for this tag so any resolution change
@@ -244,7 +247,8 @@ async def tag_video_page(share_id: str, video_id: int, request: Request = None,
     # featured tag share stays limited to limit_to_tag; a password-protected OR
     # non-featured (capability-URL) share reaches the tag's full contents.
     respect_limit = access.tag_share_respects_limit_tag(tag_share.password_hash,
-                                                        tag_share.show_in_gallery)
+                                                        tag_share.show_in_gallery,
+                                                        tag_share.apply_limit_tag)
     if not await is_video_in_tag(tag_share.stash_tag_id, video_id,
                                  respect_limit_tag=respect_limit):
         raise HTTPException(status_code=404, detail="Video not found in this tag")

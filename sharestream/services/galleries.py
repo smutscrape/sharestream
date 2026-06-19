@@ -20,9 +20,10 @@ from sharestream.backends.stash import (
     find_tag_by_name,
     get_all_videos_by_tag,
     get_scene_meta,
+    get_tag_description,
     get_videos_by_tag,
 )
-from sharestream.config import VALID_SORTS
+from sharestream.config import BASE_DOMAIN, VALID_SORTS
 from sharestream.core.branding import site_context
 from sharestream.db.models import SharedTag, SharedVideo
 from sharestream.services.access import tag_share_respects_limit_tag
@@ -341,7 +342,8 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
     # A password-protected OR non-featured (capability-URL) share is a deliberate
     # share, so its own gallery shows the tag's full contents.
     respect_limit = tag_share_respects_limit_tag(tag_share.password_hash,
-                                                 tag_share.show_in_gallery)
+                                                 tag_share.show_in_gallery,
+                                                 tag_share.apply_limit_tag)
 
     # Aggregate play counts per Stash scene (across every share context), so a
     # video's count matches the home page and its own video page. Populated once
@@ -405,6 +407,10 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
 
     await _warm_thumbnails(warm_coros)
 
+    # Prefer the tag's own Stash description for og:description (falls through to
+    # site_description/site_motto in the template when the tag has none).
+    tag_description = await get_tag_description(tag_share.stash_tag_id)
+
     context = site_context(request)
     context.update(
         video_cards=video_cards,
@@ -417,6 +423,12 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
         total_videos=total_count,
         total_videos_label=format_count(total_count),
         sort=sort,
+        # Social-embed: this share's negotiated collection thumbnail.
+        collection_share_id=share_id,
+        og_title=f"{tag_share.tag_name} ({format_count(total_count)} videos)",
+        og_image=f"{BASE_DOMAIN}/tag/{share_id}/collection-thumb",
+        page_url=f"{BASE_DOMAIN}/{share_id}",
+        og_description=tag_description,
     )
     return context
 
@@ -523,5 +535,9 @@ async def build_tag_name_gallery_context(db: Session, tag_name: str, request=Non
         current_page=None,  # Disabling pagination for this view
         has_prev_page=False,
         has_next_page=False,
+        # Public aggregation page (not a single share): no per-share collection
+        # thumbnail, so the template falls back to the site OG image.
+        og_title=f"Tag: {tag_name}",
+        page_url=f"{BASE_DOMAIN}/gallery/tag/{tag_name}",
     )
     return context

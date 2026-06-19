@@ -4,6 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ page_title }} - {{ site_name or 'Sharestream' }}</title>
+
+    {# Open Graph / Twitter social-embed tags. og:image is the first image in the
+       page's Markdown when present, else the site thumbnail. #}
+    {% set og_desc = site_description or site_motto or ('Read ' ~ page_title ~ ' on ' ~ (site_name or 'Sharestream')) %}
+    <meta property="og:type"        content="article">
+    <meta property="og:site_name"   content="{{ site_name or 'Sharestream' }}">
+    <meta property="og:title"       content="{{ og_title or page_title }}">
+    <meta property="og:url"         content="{{ page_url }}">
+    <meta property="og:image"       content="{{ og_image }}">
+    <meta property="og:image:secure_url" content="{{ og_image }}">
+    <meta property="og:description" content="{{ og_desc }}">
+    <meta name="twitter:card"        content="summary_large_image">
+    <meta name="twitter:title"       content="{{ og_title or page_title }}">
+    <meta name="twitter:description" content="{{ og_desc }}">
+    <meta name="twitter:image"       content="{{ og_image }}">
+
     <link rel="stylesheet" href="/static/styles.css">
     <link rel="stylesheet" href="/fonts.css">
     <link rel="icon" href="/favicon.ico" sizes="any">

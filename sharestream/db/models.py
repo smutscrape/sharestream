@@ -50,6 +50,11 @@ class SharedTag(Base):
     embed_mode = Column(String, nullable=True)  # preview | full | dynamic | None(=config default)
     sort_order = Column(Integer, default=0)  # display order for the home "Collections" row & admin list
     default_sort = Column(String, nullable=True)  # date|title|hits|rating|duration|random | None(=config default)
+    # For a NON-public share (password-protected OR not home-featured): whether the
+    # global limit_to_tag filter is applied to this share's own surfaces. Featured
+    # public shares always apply it regardless. New shares default to True; existing
+    # rows are back-filled to False by the migration to preserve prior behavior.
+    apply_limit_tag = Column(Boolean, default=True)
 
 
 class TagVideoHit(Base):

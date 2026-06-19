@@ -165,23 +165,52 @@ def password_prompt_if_locked(request: Request, share_id: str,
 
 
 # ------------------------------------------------------------------
+# Filedrop gate (plaintext config password + signed unlock cookie)
+# ------------------------------------------------------------------
+# The filedrop password lives in config as plaintext (operator's choice), so we
+# compare it directly rather than via bcrypt. Once a visitor passes it we issue
+# the SAME signed unlock cookie used for share passwords, keyed to "filedrop", so
+# the upload endpoint can authorize cookie-only (no password echoed per request).
+FILEDROP_COOKIE_ID = "filedrop"
+
+
+def filedrop_access_ok(request: Request, configured_password: str) -> bool:
+    """True if filedrop is open (no password) OR the request carries the unlock
+    cookie. Used to gate both the page and the upload endpoint."""
+    if not configured_password:
+        return True
+    return has_valid_pw_cookie(request, FILEDROP_COOKIE_ID)
+
+
+def filedrop_password_ok(submitted: str, configured_password: str) -> bool:
+    """Constant-time compare of a submitted filedrop password to the config one."""
+    if not configured_password:
+        return True
+    return hmac.compare_digest(str(submitted or ""), configured_password)
+
+
+# ------------------------------------------------------------------
 # limit_to_tag scope for a tag share's OWN surfaces
 # ------------------------------------------------------------------
-def tag_share_respects_limit_tag(password_hash: Optional[str], show_in_gallery: bool) -> bool:
+def tag_share_respects_limit_tag(password_hash: Optional[str], show_in_gallery: bool,
+                                 apply_limit_tag: bool = True) -> bool:
     """Whether the global ``limit_to_tag`` filter applies to a tag share's OWN
     pages/media (its ``/tag/{share_id}`` gallery, ``/tag/{share_id}/video/{id}``
     page, and that share's media sub-requests).
 
-    Only a PUBLIC, home-featured tag share is limited. A share that is
-    password-protected OR not featured on the home gallery is treated as a
-    deliberate, capability-URL share whose recipient may reach the tag's full
-    contents, so the filter is bypassed for it.
+    A PUBLIC, home-featured tag share is ALWAYS limited (un-curated videos must
+    never surface on the public site). A share that is password-protected OR not
+    featured is a deliberate, capability-URL share; for it the operator chooses
+    per share via ``apply_limit_tag`` (default True) whether to keep the filter or
+    expose the tag's full contents.
 
     This governs ONLY a share's own surfaces. The public aggregation pages (the
     home gallery and ``/gallery/tag/{name}``) always apply the filter regardless,
     so non-curated videos never surface while browsing the site.
     """
-    return password_hash is None and bool(show_in_gallery)
+    if password_hash is None and show_in_gallery:
+        return True  # featured public share: always limited
+    return bool(apply_limit_tag)  # non-public: operator's per-share choice
 
 
 # ------------------------------------------------------------------
@@ -204,7 +233,8 @@ async def authorize_media(request: Request, resolved) -> None:
         # password-protected OR non-featured (capability-URL) shares reach the
         # tag's full contents, so membership is checked against the full set.
         respect_limit = tag_share_respects_limit_tag(resolved.password_hash,
-                                                     resolved.show_in_gallery)
+                                                     resolved.show_in_gallery,
+                                                     resolved.apply_limit_tag)
         if not await is_video_in_tag(resolved.stash_tag_id, resolved.stash_video_id,
                                      respect_limit_tag=respect_limit):
             raise HTTPException(status_code=404, detail="Video not found in this tag")
@@ -234,16 +264,36 @@ async def authorize_tag_video(request: Request, share_id: str, video_id: int) ->
         stash_tag_id = tag_share.stash_tag_id
         expires_at = tag_share.expires_at
         show_in_gallery = tag_share.show_in_gallery
+        apply_limit_tag = tag_share.apply_limit_tag
         db.expunge(tag_share)
     # ---- session released; no DB connection held past this point ----
     ensure_not_expired(expires_at, "Tag share has expired")
     if not media_access_ok(request, share_id, password_hash):
         raise HTTPException(status_code=403, detail="Password required")
-    # Only a public, home-featured share stays limited to limit_to_tag; password-
-    # protected OR non-featured (capability-URL) shares see the tag's full contents.
-    respect_limit = tag_share_respects_limit_tag(password_hash, show_in_gallery)
+    # A featured public share is always limited; a non-public share follows its
+    # operator's per-share apply_limit_tag choice.
+    respect_limit = tag_share_respects_limit_tag(password_hash, show_in_gallery, apply_limit_tag)
     if not await is_video_in_tag(stash_tag_id, video_id, respect_limit_tag=respect_limit):
         raise HTTPException(status_code=404, detail="Video not found in this tag")
+    return tag_share
+
+
+def authorize_tag_share(request: Request, db: Session, share_id: str,
+                        expired_detail: str = "Tag share has expired") -> SharedTag:
+    """Gate a media sub-request for a tag SHARE as a whole (its collection-thumb),
+    enforcing expiry + password keyed to the tag share id.
+
+    Parallels :func:`authorize_share_media` but for the collection (no single
+    video / membership check). A password-protected tag share therefore won't
+    expose a collection preview to an anonymous crawler — the same privacy stance
+    as the embed player.
+    """
+    tag_share = db.query(SharedTag).filter(SharedTag.share_id == share_id).first()
+    if not tag_share:
+        raise HTTPException(status_code=404, detail="Tag share not found")
+    ensure_not_expired(tag_share.expires_at, expired_detail)
+    if not media_access_ok(request, share_id, tag_share.password_hash):
+        raise HTTPException(status_code=403, detail="Password required")
     return tag_share
 
 

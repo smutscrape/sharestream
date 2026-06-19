@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Drop - {{ site_name or 'Sharestream' }}</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/admin.css">
+    <link rel="stylesheet" href="/fonts.css">
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="apple-touch-icon" href="/favicon.png">
+    <style>
+        .filedrop-section { max-width: 640px; margin: 0 auto; }
+        .dropzone {
+            border: 2px dashed rgba(255, 0, 128, 0.5);
+            border-radius: 12px;
+            padding: 48px 24px;
+            text-align: center;
+            cursor: pointer;
+            transition: background 0.2s, border-color 0.2s;
+            background: rgba(255, 0, 128, 0.05);
+        }
+        .dropzone.dragover { background: rgba(255, 0, 128, 0.15); border-color: #ff2a6d; }
+        .dropzone p { margin: 8px 0; color: #c8b3d4; }
+        .dropzone .hint { font-size: 0.85rem; opacity: 0.7; }
+        #file-input { display: none; }
+        .upload-list { list-style: none; padding: 0; margin: 24px 0 0; }
+        .upload-item {
+            background: rgba(20, 10, 30, 0.6);
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 10px;
+        }
+        .upload-item .name { font-weight: 600; word-break: break-all; }
+        .upload-item .status { font-size: 0.85rem; opacity: 0.85; margin-top: 4px; }
+        .upload-item .status.done { color: #4ade80; }
+        .upload-item .status.error { color: #ff6b6b; }
+        .progress-track { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; margin-top: 8px; overflow: hidden; }
+        .progress-bar { height: 100%; width: 0; background: linear-gradient(90deg, #ff006e, #ff6ec7); transition: width 0.2s; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <a href="{{ base_domain }}">
+                <img src="{{ logo_path }}" srcset="{{ srcset }}" alt="Logo" class="logo">
+            </a>
+            {% if site_motto %}
+            <div class="site-motto">{{ site_motto }}</div>
+            {% endif %}
+        </header>
+
+        {% if locked %}
+        <div class="admin-section filedrop-section" style="max-width: 400px;">
+            <form action="/filedrop/verify" method="post" class="login-form">
+                <label for="password"><h2>Enter Password to Upload</h2></label>
+                <input type="password" name="password" id="password" placeholder="" required autofocus>
+                <button type="submit">Submit</button>
+            </form>
+            {% if error_message %}
+            <p class="error-message">{{ error_message }}</p>
+            {% endif %}
+        </div>
+        {% else %}
+        <div class="admin-section filedrop-section">
+            <h2>Upload Files</h2>
+            <p style="color:#c8b3d4; margin-bottom:20px;">Drop video files below to add them to the collection.</p>
+            <div class="dropzone" id="dropzone">
+                <p><strong>Drag &amp; drop</strong> files here</p>
+                <p class="hint">or click to choose &middot; max {{ max_upload_mb }} MB each</p>
+                <p class="hint">Allowed: {{ allowed_exts | join(', ') }}</p>
+            </div>
+            <input type="file" id="file-input" multiple accept="video/*">
+            <ul class="upload-list" id="upload-list"></ul>
+        </div>
+        {% endif %}
+
+        {% include "footer.html" %}
+    </div>
+
+    {% if not locked %}
+    <script>
+        (function () {
+            const dropzone = document.getElementById('dropzone');
+            const fileInput = document.getElementById('file-input');
+            const list = document.getElementById('upload-list');
+            const MAX_MB = {{ max_upload_mb }};
+            const ALLOWED = {{ allowed_exts | tojson }};
+
+            dropzone.addEventListener('click', () => fileInput.click());
+            ['dragenter', 'dragover'].forEach(ev =>
+                dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.add('dragover'); }));
+            ['dragleave', 'drop'].forEach(ev =>
+                dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('dragover'); }));
+            dropzone.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
+            fileInput.addEventListener('change', () => handleFiles(fileInput.files));
+
+            // Upload sequentially so we don't saturate the SFTP link or Stash scans.
+            let queue = Promise.resolve();
+            function handleFiles(files) {
+                for (const file of files) {
+                    const item = makeItem(file.name);
+                    queue = queue.then(() => uploadOne(file, item));
+                }
+                fileInput.value = '';
+            }
+
+            function makeItem(name) {
+                const li = document.createElement('li');
+                li.className = 'upload-item';
+                li.innerHTML = `<div class="name"></div>
+                    <div class="progress-track"><div class="progress-bar"></div></div>
+                    <div class="status">Queued…</div>`;
+                li.querySelector('.name').textContent = name;
+                list.appendChild(li);
+                return {
+                    bar: li.querySelector('.progress-bar'),
+                    status: li.querySelector('.status'),
+                };
+            }
+
+            function extOf(name) {
+                const i = name.lastIndexOf('.');
+                return i >= 0 ? name.slice(i).toLowerCase() : '';
+            }
+
+            function uploadOne(file, item) {
+                return new Promise(resolve => {
+                    if (!ALLOWED.includes(extOf(file.name))) {
+                        item.status.textContent = 'Rejected: file type not allowed';
+                        item.status.className = 'status error';
+                        return resolve();
+                    }
+                    if (file.size > MAX_MB * 1024 * 1024) {
+                        item.status.textContent = `Rejected: exceeds ${MAX_MB} MB`;
+                        item.status.className = 'status error';
+                        return resolve();
+                    }
+                    const fd = new FormData();
+                    fd.append('file', file, file.name);
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', '/filedrop/upload');
+                    xhr.upload.addEventListener('progress', e => {
+                        if (e.lengthComputable) {
+                            const pct = Math.round((e.loaded / e.total) * 100);
+                            item.bar.style.width = pct + '%';
+                            item.status.textContent = pct < 100 ? `Uploading ${pct}%` : 'Processing on server…';
+                        }
+                    });
+                    xhr.addEventListener('load', () => {
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            let data = {};
+                            try { data = JSON.parse(xhr.responseText); } catch (e) {}
+                            item.bar.style.width = '100%';
+                            if (data.status === 'done') {
+                                item.status.textContent = data.tagged
+                                    ? `Done — added to Stash (scene #${data.scene_id}, tagged)`
+                                    : `Done — added to Stash (scene #${data.scene_id})`;
+                            } else {
+                                item.status.textContent = 'Uploaded — Stash is still processing it';
+                            }
+                            item.status.className = 'status done';
+                        } else {
+                            let msg = `Failed (${xhr.status})`;
+                            try { msg = JSON.parse(xhr.responseText).detail || msg; } catch (e) {}
+                            item.status.textContent = msg;
+                            item.status.className = 'status error';
+                        }
+                        resolve();
+                    });
+                    xhr.addEventListener('error', () => {
+                        item.status.textContent = 'Network error';
+                        item.status.className = 'status error';
+                        resolve();
+                    });
+                    xhr.send(fd);
+                });
+            }
+        })();
+    </script>
+    {% endif %}
+</body>
+</html>

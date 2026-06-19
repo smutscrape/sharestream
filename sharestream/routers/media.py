@@ -11,12 +11,17 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 
+from sharestream.backends.stash import get_videos_by_tag
 from sharestream.config import SHARES_DIR
 from sharestream.db.session import SessionLocal
 from sharestream.services import access, media_proxy
+from sharestream.services.collection_thumbnails import (
+    build_collection_collage,
+    build_collection_webp,
+)
 from sharestream.services.resolver import resolve_media
 from sharestream.services.thumbnails import (
     fetch_and_cache_tag_video_thumbnail,
@@ -85,6 +90,46 @@ async def serve_share_thumbnail(share_id: str, request: Request = None,
     if not placeholder:
         raise HTTPException(status_code=404, detail="No thumbnail available")
     return RedirectResponse(url="/static/default_thumbnail.jpg", status_code=302)
+
+
+@router.api_route("/tag/{share_id}/collection-thumb", methods=["GET", "HEAD"])
+async def serve_collection_thumb(share_id: str, request: Request):
+    """Negotiated social-embed thumbnail for a tag (collection) share.
+
+    Serves a shuffled montage animated WebP (merged member-video previews) to
+    WebP-capable clients, or a collage JPEG (grid of member screenshots) to
+    clients that need JPEG (Reddit, Embed.ly, Twitterbot) — same URL, chosen per
+    request like ``media_proxy.proxy_thumb``. Falls back to the site thumbnail
+    when the collection has no usable source media."""
+    with SessionLocal() as db:
+        tag_share = access.authorize_tag_share(request, db, share_id)
+        stash_tag_id = tag_share.stash_tag_id
+        password_hash = tag_share.password_hash
+        show_in_gallery = tag_share.show_in_gallery
+        apply_limit_tag = tag_share.apply_limit_tag
+
+    # Mirror the share's own surfaces: a featured public share is always limited;
+    # a non-public share follows its operator's per-share apply_limit_tag choice.
+    respect_limit = access.tag_share_respects_limit_tag(password_hash, show_in_gallery, apply_limit_tag)
+    videos, _ = await get_videos_by_tag(stash_tag_id, respect_limit_tag=respect_limit)
+    video_ids = [int(v["id"]) for v in videos]
+
+    prefers_jpeg = media_proxy._thumb_prefers_jpeg(request)
+    if prefers_jpeg:
+        path = await build_collection_collage(share_id, video_ids)
+        media_type = "image/jpeg"
+    else:
+        path = await build_collection_webp(share_id, video_ids)
+        media_type = "image/webp"
+
+    if not path:
+        # No usable member media (or compose failed): fall back to the site image.
+        return RedirectResponse(url="/og/site-thumbnail", status_code=302)
+
+    headers = {"Cache-Control": "private, max-age=300", "Vary": "Accept, User-Agent"}
+    if request.method == "HEAD":
+        return Response(status_code=200, media_type=media_type, headers=headers)
+    return FileResponse(path, media_type=media_type, headers=headers)
 
 
 # ------------------------------------------------------------------

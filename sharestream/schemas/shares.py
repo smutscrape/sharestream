@@ -28,6 +28,9 @@ class ShareTagRequest(BaseModel):
     custom_share_id: str | None = None
     embed_mode: str | None = None
     default_sort: str | None = None  # date|title|hits|rating|duration|random | None(=config default)
+    # Whether limit_to_tag applies to this share's own surfaces when it's NOT a
+    # featured public share. Defaults True; only meaningful when LIMIT_TO_TAG is set.
+    apply_limit_tag: bool = True
     clear_password: bool = False
 
 

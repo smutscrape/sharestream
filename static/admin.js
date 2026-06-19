@@ -36,6 +36,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const tagResolutionInput = document.getElementById('tag-resolution');
     const tagSharePasswordInput = document.getElementById('tag-share-password');
     const tagShowInGalleryInput = document.getElementById('tag-show-in-gallery');
+    const tagApplyLimitTagInput = document.getElementById('tag-apply-limit-tag');
+    const tagApplyLimitWrapper = document.getElementById('tag-apply-limit-wrapper');
     const tagDefaultSortSelect = document.getElementById('default-sort-tag');
     const lookupTagButton = document.getElementById('lookup-tag-button');
     const tagShareMessage = document.getElementById('tag-share-message');
@@ -69,6 +71,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const editTagDefaultSortSelect = document.getElementById('edit-tag-default-sort');
     const editTagSharePasswordInput = document.getElementById('edit-tag-share-password');
     const editTagShowInGalleryInput = document.getElementById('edit-tag-show-in-gallery');
+    const editTagApplyLimitTagInput = document.getElementById('edit-tag-apply-limit-tag');
+    const editTagApplyLimitWrapper = document.getElementById('edit-tag-apply-limit-wrapper');
     const editTagClearPasswordInput = document.getElementById('edit-tag-clear-password');
     const saveEditTagButton = document.getElementById('save-edit-tag-button');
     const cancelEditTagButton = document.getElementById('cancel-edit-tag-button');
@@ -277,6 +281,31 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // A home-featured share is ALWAYS limited to limit_to_tag, so the "Apply tag
+    // limit?" toggle only matters for non-featured shares. When "Feature on Home?"
+    // is on, force the apply-limit toggle checked + disabled to reflect that.
+    function syncApplyLimitState() {
+        if (!tagApplyLimitTagInput || !tagShowInGalleryInput) return;
+        const featured = tagShowInGalleryInput.checked;
+        tagApplyLimitTagInput.disabled = featured;
+        if (featured) tagApplyLimitTagInput.checked = true;
+        if (tagApplyLimitWrapper) tagApplyLimitWrapper.style.opacity = featured ? '0.5' : '1';
+    }
+    function syncEditApplyLimitState() {
+        if (!editTagApplyLimitTagInput || !editTagShowInGalleryInput) return;
+        const featured = editTagShowInGalleryInput.checked;
+        editTagApplyLimitTagInput.disabled = featured;
+        if (featured) editTagApplyLimitTagInput.checked = true;
+        if (editTagApplyLimitWrapper) editTagApplyLimitWrapper.style.opacity = featured ? '0.5' : '1';
+    }
+    if (tagShowInGalleryInput) {
+        tagShowInGalleryInput.addEventListener('change', syncApplyLimitState);
+        syncApplyLimitState();
+    }
+    if (editTagShowInGalleryInput) {
+        editTagShowInGalleryInput.addEventListener('change', syncEditApplyLimitState);
+    }
+
     if (authToken) {
         showAdmin();
     } else {
@@ -454,6 +483,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 resolution: tagResolutionInput.value,
                 password: tagSharePasswordInput.value || null,
                 show_in_gallery: tagShowInGalleryInput.checked,
+                apply_limit_tag: tagApplyLimitTagInput ? tagApplyLimitTagInput.checked : true,
                 custom_share_id: customShareId,
                 embed_mode: (tagEmbedModeSelect && tagEmbedModeSelect.value) || null,
                 default_sort: (tagDefaultSortSelect && tagDefaultSortSelect.value) || null
@@ -469,7 +499,13 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const result = await apiRequest('/share_tag', 'POST', shareTagData);
                 tagShareMessage.textContent = `Tag shared successfully! URL: ${result.share_url} (${result.video_count} videos)`;
+                // Stash the plaintext password (the server only keeps its hash) so
+                // the Copy button can append ?pwd= for the rest of this session.
+                if (shareTagData.password && result.share_id) {
+                    sharePasswords[result.share_id] = shareTagData.password;
+                }
                 shareTagForm.reset();
+                syncApplyLimitState();  // reset() re-checks defaults; re-sync disabled state
                 tagIdInput.value = '';
                 tagIdInput.placeholder = 'Auto-filled after lookup';
                 if(shareIdTypeSelect) shareIdTypeSelect.value = 'random';
@@ -585,12 +621,19 @@ document.addEventListener('DOMContentLoaded', () => {
             const displayName = truncateText(`${tag.tag_name} (${tag.resolution})`, 30);
             const fullName = `${tag.tag_name} (${tag.resolution})`;
 
+            // If the tag share has a password and we know it (created this
+            // session), append ?pwd= so the copied link unlocks it directly.
+            let copyUrl = shareUrl;
+            if (tag.has_password && sharePasswords[tag.share_id]) {
+                copyUrl += (shareUrl.includes('?') ? '&' : '?') + 'pwd=' + encodeURIComponent(sharePasswords[tag.share_id]);
+            }
+
             row.innerHTML = `
                 <td title="${escapeHTML(fullName)}"><span class="drag-grip" title="Drag to reorder">⠿</span>${escapeHTML(displayName)}</td>
                 <td>${tag.hits}</td>
                 <td>${relativeTime}</td>
                 <td>
-                    <button class="copy-button" data-url="${escapeHTML(shareUrl)}">Copy</button>
+                    <button class="copy-button" data-url="${escapeHTML(copyUrl)}">Copy</button>
                     <button class="edit-tag-button" 
                         data-share-id="${escapeHTML(tag.share_id)}" 
                         data-tag-name="${escapeHTML(tag.tag_name)}" 
@@ -599,6 +642,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         data-resolution="${escapeHTML(tag.resolution)}" 
                         data-has-password="${tag.has_password}" 
                         data-show-in-gallery="${tag.show_in_gallery}"
+                        data-apply-limit-tag="${tag.apply_limit_tag}"
                         data-embed-mode="${escapeHTML(tag.embed_mode || '')}"
                         data-default-sort="${escapeHTML(tag.default_sort || '')}">Edit</button>
                     <button class="delete-tag-button" data-share-id="${escapeHTML(tag.share_id)}">Delete</button>
@@ -720,7 +764,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if(editTagDefaultSortSelect) editTagDefaultSortSelect.value = t.getAttribute('data-default-sort') || '';
                 if(editTagSharePasswordInput) editTagSharePasswordInput.value = '';
                 if(editTagShowInGalleryInput) editTagShowInGalleryInput.checked = t.getAttribute('data-show-in-gallery') === 'true';
+                if(editTagApplyLimitTagInput) editTagApplyLimitTagInput.checked = t.getAttribute('data-apply-limit-tag') === 'true';
                 if(editTagClearPasswordInput) editTagClearPasswordInput.checked = false;
+                syncEditApplyLimitState();
 
                 if(editTagModal) editTagModal.style.display = 'block';
                 clearMessages();
@@ -774,6 +820,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
             try {
                 await apiRequest(`/edit_share/${shareId}`, 'PUT', updatedData);
+                // Keep the session password map in sync so the Copy link's ?pwd=
+                // reflects the edit (a new password set, or a cleared one).
+                if (updatedData.clear_password) {
+                    delete sharePasswords[shareId];
+                } else if (updatedData.password) {
+                    sharePasswords[shareId] = updatedData.password;
+                }
                 if(editModal) editModal.style.display = 'none';
                 fetchSharedContent();
             } catch (error) {
@@ -800,6 +853,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 resolution: editTagResolutionInput.value,
                 password: editTagSharePasswordInput.value || null,
                 show_in_gallery: editTagShowInGalleryInput.checked,
+                apply_limit_tag: editTagApplyLimitTagInput ? editTagApplyLimitTagInput.checked : true,
                 embed_mode: (editTagEmbedModeSelect && editTagEmbedModeSelect.value) || null,
                 default_sort: (editTagDefaultSortSelect && editTagDefaultSortSelect.value) || null,
                 clear_password: editTagClearPasswordInput ? editTagClearPasswordInput.checked : false
@@ -812,6 +866,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
             try {
                 await apiRequest(`/edit_tag_share/${shareId}`, 'PUT', updatedData);
+                // Keep the session password map in sync so the Copy link's ?pwd=
+                // reflects the edit (a new password set, or a cleared one).
+                if (updatedData.clear_password) {
+                    delete sharePasswords[shareId];
+                } else if (updatedData.password) {
+                    sharePasswords[shareId] = updatedData.password;
+                }
                 if(editTagModal) editTagModal.style.display = 'none';
                 fetchSharedContent();
             } catch (error) {

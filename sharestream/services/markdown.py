@@ -16,10 +16,15 @@ import markdown as md
 _ALLOWED_TAGS = [
     "p", "h1", "h2", "h3", "h4", "h5", "h6",
     "ul", "ol", "li", "blockquote", "pre", "code",
-    "em", "strong", "del", "a", "hr", "br",
+    "em", "strong", "del", "a", "hr", "br", "img",
     "table", "thead", "tbody", "tr", "th", "td",
 ]
-_ALLOWED_ATTRS = {"a": ["href", "title"], "th": ["align"], "td": ["align"]}
+_ALLOWED_ATTRS = {
+    "a": ["href", "title"],
+    "img": ["src", "alt", "title", "width", "height"],
+    "th": ["align"],
+    "td": ["align"],
+}
 _ALLOWED_PROTOCOLS = ["http", "https", "mailto"]
 
 _TITLE_RE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
@@ -27,6 +32,9 @@ _STRIP_LEADING_H1_RE = re.compile(r"^\s*#\s+.+?\s*(?:\r?\n|$)", re.MULTILINE)
 # GFM ~~strikethrough~~ (not part of Python-Markdown's ``extra`` bundle).
 _STRIKE_RE = re.compile(r"~~([^~\n]+?)~~")
 _CODE_SPAN_RE = re.compile(r"(`[^`\n]+`|```[\s\S]*?```)")
+# First image in document order: Markdown ``![alt](url "title")`` or raw <img src=...>.
+_MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+[^)]*)?\)")
+_HTML_IMAGE_RE = re.compile(r"<img\b[^>]*?\bsrc\s*=\s*[\"']([^\"']+)[\"']", re.IGNORECASE)
 
 
 def _apply_strikethrough(source: str) -> str:
@@ -54,6 +62,23 @@ def render_markdown(text: str | None) -> str:
         protocols=_ALLOWED_PROTOCOLS,
         strip=True,
     )
+
+
+def first_markdown_image(text: str | None) -> str | None:
+    """Return the URL of the first image in ``text`` (Markdown or raw <img>), in
+    document order, ignoring images inside inline/fenced code spans. None if none.
+    """
+    if not text:
+        return None
+    # Strip code spans so an image referenced in a code example isn't picked up.
+    parts = _CODE_SPAN_RE.split(str(text))
+    cleaned = "".join(parts[i] for i in range(0, len(parts), 2))
+    best = None
+    for rx in (_MD_IMAGE_RE, _HTML_IMAGE_RE):
+        m = rx.search(cleaned)
+        if m and (best is None or m.start() < best[0]):
+            best = (m.start(), m.group(1).strip())
+    return best[1] if best else None
 
 
 def markdown_page_title(text: str, fallback: str) -> str:

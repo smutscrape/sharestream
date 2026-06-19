@@ -43,6 +43,9 @@ class ResolvedMedia:
     # tag videos; it (together with password_hash) decides whether the share's
     # media stays limited to limit_to_tag. Always False for individual shares.
     show_in_gallery: bool = False
+    # For a non-public tag share, whether its operator opted to apply limit_to_tag.
+    # Always True for individual shares (no effect there).
+    apply_limit_tag: bool = True
 
     @property
     def is_tag_video(self) -> bool:
@@ -106,6 +109,7 @@ def resolve_media(db: Session, share_id: str) -> Optional[ResolvedMedia]:
                 stash_tag_id=tag_share.stash_tag_id,
                 title=None,
                 show_in_gallery=tag_share.show_in_gallery,
+                apply_limit_tag=tag_share.apply_limit_tag,
             )
 
     return None

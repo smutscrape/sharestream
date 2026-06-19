@@ -4,6 +4,21 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ site_name or 'Sharestream' }}</title>
+
+    {# Open Graph / Twitter social-embed tags for the home page. #}
+    {% set og_desc = site_description or site_motto or ('Browse ' ~ (site_name or 'Sharestream')) %}
+    <meta property="og:type"        content="website">
+    <meta property="og:site_name"   content="{{ site_name or 'Sharestream' }}">
+    <meta property="og:title"       content="{{ site_name or 'Sharestream' }}">
+    <meta property="og:url"         content="{{ base_domain }}">
+    <meta property="og:image"       content="{{ og_site_image }}">
+    <meta property="og:image:secure_url" content="{{ og_site_image }}">
+    <meta property="og:description" content="{{ og_desc }}">
+    <meta name="twitter:card"        content="summary_large_image">
+    <meta name="twitter:title"       content="{{ site_name or 'Sharestream' }}">
+    <meta name="twitter:description" content="{{ og_desc }}">
+    <meta name="twitter:image"       content="{{ og_site_image }}">
+
     <link rel="stylesheet" href="/static/styles.css">
     <link rel="stylesheet" href="/fonts.css">
     <link rel="icon" href="/favicon.ico" sizes="any">

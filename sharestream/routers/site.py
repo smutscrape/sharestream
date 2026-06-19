@@ -1,5 +1,8 @@
-"""Site-level helper routes: config JSON, favicon, and custom fonts CSS."""
+"""Site-level helper routes: config JSON, favicon, custom fonts CSS, and the
+social-embed (Open Graph) site thumbnail."""
 from __future__ import annotations
+
+import mimetypes
 
 from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import FileResponse
@@ -10,6 +13,7 @@ from sharestream.core.branding import (
     resolve_favicon_path,
     resolve_favicon_png_path,
     resolve_logo,
+    resolve_site_thumbnail_source,
 )
 
 router = APIRouter()
@@ -53,6 +57,22 @@ async def favicon_png():
         return FileResponse(path, media_type="image/png",
                             headers={"Cache-Control": "public, max-age=86400"})
     raise HTTPException(status_code=404, detail="No favicon")
+
+
+@router.api_route("/og/site-thumbnail", methods=["GET", "HEAD"], include_in_schema=False)
+async def og_site_thumbnail():
+    """Social-embed (Open Graph) thumbnail for the home page and static pages.
+
+    Serves the operator-configured ``site_thumbnail`` as-is (falling back to the
+    favicon PNG, then the bundled default). No re-encoding — the configured raster
+    image is delivered directly so a transparent PNG keeps its alpha and a JPG is
+    untouched."""
+    path = resolve_site_thumbnail_source()
+    if not path:
+        raise HTTPException(status_code=404, detail="No site thumbnail")
+    media_type = mimetypes.guess_type(path)[0] or "image/jpeg"
+    return FileResponse(path, media_type=media_type,
+                        headers={"Cache-Control": "public, max-age=86400"})
 
 
 @router.get("/fonts.css", include_in_schema=False)

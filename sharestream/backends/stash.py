@@ -8,6 +8,7 @@ queries so that every tag-listing path only ever sees videos carrying that tag.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import httpx
@@ -163,6 +164,32 @@ async def find_tag_by_name(tag_name: str) -> dict | None:
 
     except Exception as e:
         logger.error(f"Error finding tag '{tag_name}': {e}")
+        return None
+
+
+async def get_tag_description(tag_id: str) -> str | None:
+    """Return a tag's Stash description by id, or None if unset/unavailable."""
+    query = {
+        "operationName": "FindTag",
+        "variables": {"id": str(tag_id)},
+        "query": """
+            query FindTag($id: ID!) {
+                findTag(id: $id) { description }
+            }
+        """,
+    }
+    try:
+        response = await http_client.post(GRAPHQL_URL, json=query, headers=_graphql_headers())
+        response.raise_for_status()
+        data = response.json()
+        if data.get("errors"):
+            logger.error(f"GraphQL error getting tag {tag_id} description: {data['errors']}")
+            return None
+        tag = data.get("data", {}).get("findTag") or {}
+        desc = (tag.get("description") or "").strip()
+        return desc or None
+    except Exception as e:
+        logger.error(f"Error getting tag {tag_id} description: {e}")
         return None
 
 
@@ -621,3 +648,133 @@ async def get_video_details(stash_video_id: int) -> dict | None:
     except Exception as e:
         logger.error(f"Error getting scene details for ID {stash_video_id}: {e}")
         return None
+
+
+# ------------------------------------------------------------------
+# Mutations (filedrop ingestion: scan a path, then tag the new scene)
+# ------------------------------------------------------------------
+async def metadata_scan(paths: list[str]) -> str | None:
+    """Trigger a Stash metadata scan of the given (Stash-visible) paths.
+
+    Returns the job id, or None on error. Paths must be as STASH sees them
+    (inside its container/library), not the host path the bytes were written to.
+    """
+    query = {
+        "operationName": "MetadataScan",
+        "variables": {"input": {"paths": paths}},
+        "query": "mutation MetadataScan($input: ScanMetadataInput!) { metadataScan(input: $input) }",
+    }
+    try:
+        response = await http_client.post(GRAPHQL_URL, json=query, headers=_graphql_headers())
+        response.raise_for_status()
+        data = response.json()
+        if data.get("errors"):
+            logger.error(f"GraphQL error starting metadata scan: {data['errors']}")
+            return None
+        job_id = data.get("data", {}).get("metadataScan")
+        logger.info(f"Started Stash metadata scan job {job_id} for paths={paths}")
+        return job_id
+    except Exception as e:
+        logger.error(f"Error starting metadata scan: {e}")
+        return None
+
+
+async def wait_for_job(job_id: str, timeout: float = 120.0, interval: float = 1.0) -> str:
+    """Poll findJob until the job reaches a terminal state or ``timeout`` elapses.
+
+    Returns the final status string (FINISHED / CANCELLED / FAILED), or "TIMEOUT"
+    if it didn't finish in time (the scan may still complete server-side).
+    """
+    query = {
+        "operationName": "FindJob",
+        "variables": {"input": {"id": job_id}},
+        "query": "query FindJob($input: FindJobInput!) { findJob(input: $input) { status } }",
+    }
+    elapsed = 0.0
+    terminal = {"FINISHED", "CANCELLED", "FAILED"}
+    while elapsed < timeout:
+        try:
+            response = await http_client.post(GRAPHQL_URL, json=query, headers=_graphql_headers())
+            response.raise_for_status()
+            data = response.json()
+            job = (data.get("data") or {}).get("findJob")
+            # findJob returns null once a finished job ages out of the queue —
+            # treat that as completion rather than spinning until timeout.
+            if job is None:
+                return "FINISHED"
+            status = job.get("status")
+            if status in terminal:
+                return status
+        except Exception as e:
+            logger.warning(f"Error polling job {job_id}: {e}")
+        await asyncio.sleep(interval)
+        elapsed += interval
+    logger.warning(f"Timed out waiting for Stash job {job_id} after {timeout}s")
+    return "TIMEOUT"
+
+
+async def find_scene_id_by_path(path: str) -> int | None:
+    """Return the id of the scene whose file path equals ``path``, else None."""
+    query = {
+        "operationName": "FindScenes",
+        "variables": {
+            "filter": {"page": 1, "per_page": 1, "sort": "created_at", "direction": "DESC"},
+            "scene_filter": {"path": {"value": path, "modifier": "EQUALS"}},
+        },
+        "query": """
+            query FindScenes($filter: FindFilterType, $scene_filter: SceneFilterType) {
+                findScenes(filter: $filter, scene_filter: $scene_filter) {
+                    scenes { id }
+                }
+            }
+        """,
+    }
+    try:
+        response = await http_client.post(GRAPHQL_URL, json=query, headers=_graphql_headers())
+        response.raise_for_status()
+        data = response.json()
+        if data.get("errors"):
+            logger.error(f"GraphQL error finding scene by path: {data['errors']}")
+            return None
+        scenes = (data.get("data") or {}).get("findScenes", {}).get("scenes", [])
+        return int(scenes[0]["id"]) if scenes else None
+    except Exception as e:
+        logger.error(f"Error finding scene by path '{path}': {e}")
+        return None
+
+
+async def add_tag_to_scene(scene_id: int, tag_id: str) -> bool:
+    """Add ``tag_id`` to a scene's existing tags (never clobbering the others)."""
+    # 1. Read current tag ids so we union rather than overwrite.
+    read_q = {
+        "operationName": "FindScene",
+        "variables": {"id": str(scene_id)},
+        "query": "query FindScene($id: ID!) { findScene(id: $id) { tags { id } } }",
+    }
+    try:
+        r = await http_client.post(GRAPHQL_URL, json=read_q, headers=_graphql_headers())
+        r.raise_for_status()
+        d = r.json()
+        if d.get("errors"):
+            logger.error(f"GraphQL error reading scene {scene_id} tags: {d['errors']}")
+            return False
+        scene = (d.get("data") or {}).get("findScene") or {}
+        tag_ids = {str(t["id"]) for t in scene.get("tags", [])}
+        tag_ids.add(str(tag_id))
+
+        upd_q = {
+            "operationName": "SceneUpdate",
+            "variables": {"input": {"id": str(scene_id), "tag_ids": sorted(tag_ids)}},
+            "query": "mutation SceneUpdate($input: SceneUpdateInput!) { sceneUpdate(input: $input) { id } }",
+        }
+        r2 = await http_client.post(GRAPHQL_URL, json=upd_q, headers=_graphql_headers())
+        r2.raise_for_status()
+        d2 = r2.json()
+        if d2.get("errors"):
+            logger.error(f"GraphQL error tagging scene {scene_id}: {d2['errors']}")
+            return False
+        logger.info(f"Tagged scene {scene_id} with tag {tag_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error tagging scene {scene_id} with tag {tag_id}: {e}")
+        return False

@@ -44,4 +44,10 @@ def init_db() -> None:
     _ensure_column("shared_tags", "embed_mode", "VARCHAR")
     _ensure_column("shared_tags", "sort_order", "INTEGER DEFAULT 0")
     _ensure_column("shared_tags", "default_sort", "VARCHAR")
+    # Back-fill to 0 (False), NOT the model default of True: non-public shares
+    # created before this column existed have always BYPASSED limit_to_tag, so
+    # newly applying it on restart could 404 videos those shares legitimately
+    # serve. New shares get True from the ORM default; only pre-existing rows are
+    # pinned to the old behavior here.
+    _ensure_column("shared_tags", "apply_limit_tag", "BOOLEAN DEFAULT 0")
     _seed_tag_sort_order()

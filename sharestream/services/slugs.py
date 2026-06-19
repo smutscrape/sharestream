@@ -22,7 +22,7 @@ RESERVED_SLUGS = {
     "lookup_tag", "get_video_title", "site_config", "login", "logout",
     "dmca", "gallery", "static", "admin", "__admin", "video", "v", "api",
     "favicon.ico", "favicon.png", "robots.txt", "sitemap.xml", "thumbnail", "stream",
-    "embed", "fonts.css",
+    "embed", "fonts.css", "filedrop", "og",
 }
 
 # Slugs may only contain url-safe, unambiguous characters.

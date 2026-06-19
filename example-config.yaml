@@ -1,5 +1,12 @@
 site_name: "Sharestream"  # Optional: defaults to "Sharestream" if not set
 site_motto: "Your private video collection"  # Optional: displayed under logo on gallery pages
+# Optional: social-embed (Open Graph) thumbnail shown when the home page or a
+# static page is shared on social media. Point it at a raster image (jpg/png) —
+# it is served as-is. Falls back to the favicon PNG, then a bundled default.
+site_thumbnail: "./static/localized/og-thumbnail.jpg"
+# Optional: one-sentence description used for og:description when the home page
+# (and image-less static pages) are shared. Falls back to site_motto if unset.
+site_description: "Your private video collection — stream and share."
 social_links:  # Optional: social media links displayed at bottom of pages
   - name: "Bluesky"
     logo: "https://bsky.social/favicon.ico"
@@ -62,6 +69,32 @@ embed:
 # retag scenes in Stash and want a shared collection to reflect the change.
 cache:
   tag_membership_ttl_minutes: 15
+  # Generated collection (tag-share) social-embed thumbnails — a merged animated
+  # WebP or a collage JPEG built from member videos — are cached on disk and
+  # rebuilt when older than this. Defaults to 360 (6 hours) if omitted.
+  collection_thumbnail_ttl_minutes: 360
+
+# Optional public "filedrop" upload page (served at /filedrop). Visitors can
+# upload video files that are ingested into your Stash. Stash has no upload API,
+# so files are sent over SSH/SFTP into a folder Stash scans, then scanned and
+# (optionally) tagged. DISABLED unless `enabled: true`.
+#
+# host_dir is the path ON THE SSH HOST where bytes are written; stash_scan_path
+# is THAT SAME FOLDER as Stash sees it. They differ when Stash runs in a
+# container with a bind mount (e.g. host /mnt/Media -> container /data, so a host
+# /mnt/Media/XXX/_filedrop is /data/XXX/_filedrop inside Stash). When Stash runs
+# natively, set both to the same path.
+filedrop:
+  enabled: false
+  password: ""                          # optional; empty = open page
+  tag_id:                               # optional Stash tag id applied to each upload; empty = none
+  ssh_host: 127.0.0.1
+  ssh_user: youruser
+  ssh_key: ~/.ssh/id_ed25519            # SSH private key for passwordless delivery
+  ssh_port: 22
+  host_dir: /mnt/Media/XXX/_filedrop    # where bytes are SFTP'd (path on ssh_host)
+  stash_scan_path: /data/XXX/_filedrop  # same folder as Stash sees it (container path)
+  max_upload_mb: 5000                   # reject uploads larger than this
 
 # SMTP configuration for DMCA takedown requests
 contact_form:

@@ -4,6 +4,24 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% if tag_name %}{{ tag_name }} - {{ site_name or 'Sharestream' }}{% else %}{{ site_name or 'Sharestream' }}{% endif %}</title>
+
+    {# Open Graph / Twitter social-embed tags. For an actual tag SHARE the image
+       is its negotiated collection thumbnail (montage WebP / collage JPEG); the
+       public /gallery/tag/{name} aggregation falls back to the site image. #}
+    {% set og_img = (base_domain ~ '/tag/' ~ collection_share_id ~ '/collection-thumb') if collection_share_id else og_site_image %}
+    {% set og_desc = og_description or site_description or site_motto or ('Browse this collection on ' ~ (site_name or 'Sharestream')) %}
+    <meta property="og:type"        content="website">
+    <meta property="og:site_name"   content="{{ site_name or 'Sharestream' }}">
+    <meta property="og:title"       content="{{ og_title or tag_name or (site_name or 'Sharestream') }}">
+    {% if page_url %}<meta property="og:url" content="{{ page_url }}">{% endif %}
+    <meta property="og:image"       content="{{ og_img }}">
+    <meta property="og:image:secure_url" content="{{ og_img }}">
+    <meta property="og:description" content="{{ og_desc }}">
+    <meta name="twitter:card"        content="summary_large_image">
+    <meta name="twitter:title"       content="{{ og_title or tag_name or (site_name or 'Sharestream') }}">
+    <meta name="twitter:description" content="{{ og_desc }}">
+    <meta name="twitter:image"       content="{{ og_img }}">
+
     <link rel="stylesheet" href="/static/styles.css">
     <link rel="stylesheet" href="/fonts.css">
     <link rel="icon" href="/favicon.ico" sizes="any">

@@ -53,6 +53,13 @@ if DEFAULT_SORT not in VALID_SORTS:
     DEFAULT_SORT = 'date'
 SITE_NAME = config.get('site_name', 'Sharestream')  # Add site_name with fallback
 SITE_MOTTO = config.get('site_motto', '')  # Add site_motto with empty default
+# Operator-provided social-embed (Open Graph) thumbnail for the home page and
+# static pages. A path to a raster image (jpg/png) served as-is by /og/site-thumbnail.
+# Falls back to the favicon PNG, then the bundled default, when unset/missing.
+SITE_THUMBNAIL = config.get('site_thumbnail') or ''
+# Human-readable site description for og:description on the home page (and the
+# fallback description for static pages with no body text).
+SITE_DESCRIPTION = config.get('site_description', '') or ''
 SOCIAL_LINKS = config.get('social_links', [])  # Add social_links with empty list default
 FOOTER = parse_footer_config(config)
 # Optional content warning / age-gate shown to first-time visitors on the home
@@ -81,6 +88,50 @@ try:
         raise ValueError
 except (TypeError, ValueError):
     TAG_MEMBERSHIP_TTL_SECONDS = 15 * 60
+
+# Generated collection (tag-share) social-embed thumbnails — the merged animated
+# WebP / collage JPEG — are cached on disk and rebuilt when older than this.
+# Defaults to 6 hours when unset/invalid.
+try:
+    COLLECTION_THUMBNAIL_TTL_SECONDS = float(CACHE_CONFIG.get('collection_thumbnail_ttl_minutes', 360)) * 60
+    if COLLECTION_THUMBNAIL_TTL_SECONDS <= 0:
+        raise ValueError
+except (TypeError, ValueError):
+    COLLECTION_THUMBNAIL_TTL_SECONDS = 360 * 60
+
+# ------------------------------------------------------------------
+# Filedrop: optional public upload page that ingests files into Stash.
+# ------------------------------------------------------------------
+# Stash has no byte-upload API, so uploads are SFTP'd into a folder that Stash
+# scans, then scanned + (optionally) tagged. The whole feature is OFF unless
+# `filedrop.enabled` is true, so deploying the code never opens an upload hole.
+FILEDROP_CONFIG = config.get('filedrop', {}) or {}
+FILEDROP_ENABLED = bool(FILEDROP_CONFIG.get('enabled', False))
+# Optional shared password (plaintext here by design); empty/unset = open page.
+FILEDROP_PASSWORD = str(FILEDROP_CONFIG.get('password', '') or '')
+# Optional Stash tag id applied to every ingested scene; empty/None = no tag.
+_filedrop_tag = FILEDROP_CONFIG.get('tag_id')
+FILEDROP_TAG_ID = str(_filedrop_tag) if _filedrop_tag not in (None, '') else None
+# SSH/SFTP delivery to the box hosting Stash's library.
+FILEDROP_SSH_HOST = str(FILEDROP_CONFIG.get('ssh_host', '') or '')
+FILEDROP_SSH_USER = str(FILEDROP_CONFIG.get('ssh_user', '') or '')
+FILEDROP_SSH_KEY = os.path.expanduser(str(FILEDROP_CONFIG.get('ssh_key', '~/.ssh/id_ed25519')))
+FILEDROP_SSH_PORT = int(FILEDROP_CONFIG.get('ssh_port', 22) or 22)
+# Where bytes are written on the host (host_dir) vs. how Stash sees that same
+# folder (stash_scan_path) — they differ when Stash runs in a container with a
+# bind mount (e.g. host /mnt/Media -> container /data).
+FILEDROP_HOST_DIR = str(FILEDROP_CONFIG.get('host_dir', '') or '')
+FILEDROP_STASH_SCAN_PATH = str(FILEDROP_CONFIG.get('stash_scan_path', '') or '')
+try:
+    FILEDROP_MAX_UPLOAD_MB = int(FILEDROP_CONFIG.get('max_upload_mb', 5000) or 5000)
+    if FILEDROP_MAX_UPLOAD_MB <= 0:
+        raise ValueError
+except (TypeError, ValueError):
+    FILEDROP_MAX_UPLOAD_MB = 5000
+# Accepted upload extensions (lowercase, with dot).
+FILEDROP_ALLOWED_EXTS = {
+    '.mp4', '.mkv', '.mov', '.webm', '.avi', '.m4v', '.wmv', '.flv', '.ts', '.mpg', '.mpeg', '.m2ts',
+}
 
 # SMTP settings for contact form
 CONTACT_FORM_CONFIG = config.get('contact_form', {})

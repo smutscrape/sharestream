@@ -88,6 +88,7 @@ async def shared_tags(current_user: str = Depends(get_current_user), db: Session
                 "show_in_gallery": t.show_in_gallery,
                 "embed_mode": t.embed_mode,
                 "default_sort": t.default_sort,
+                "apply_limit_tag": t.apply_limit_tag,
             })
         return result
     except Exception as e:

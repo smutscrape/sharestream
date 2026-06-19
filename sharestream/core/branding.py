@@ -15,10 +15,16 @@ from sharestream.config import (
     CONTENT_WARNING,
     DISCLAIMER,
     FOOTER,
+    SITE_DESCRIPTION,
     SITE_MOTTO,
     SITE_NAME,
+    SITE_THUMBNAIL,
     SOCIAL_LINKS,
 )
+
+# Solid fill behind composited collection thumbnails (letterboxing mixed-aspect
+# WebP frames and padding the collage grid). Matches the site's dark theme.
+OG_BG_COLOR = "#0D0715"
 
 # Drop-in custom font overrides. Place a .woff2 with one of the names below in
 # static/localized/fonts/ and it overrides that slot automatically — no CSS
@@ -79,6 +85,20 @@ def resolve_favicon_png_path() -> str | None:
     return _first_existing(FAVICON_PNG_CANDIDATES)
 
 
+def resolve_site_thumbnail_source() -> str | None:
+    """Return the on-disk path of the social-embed (Open Graph) site thumbnail.
+
+    Prefers the operator-configured ``site_thumbnail`` (leading ``./`` tolerated),
+    then the localized/bundled favicon PNG, then the bundled default thumbnail.
+    Returns None only if none of those exist.
+    """
+    configured = SITE_THUMBNAIL.lstrip("/") if SITE_THUMBNAIL.startswith("/") else SITE_THUMBNAIL
+    if configured.startswith("./"):
+        configured = configured[2:]
+    candidates = (configured,) if configured else ()
+    return _first_existing((*candidates, *FAVICON_PNG_CANDIDATES, "static/default_thumbnail.jpg"))
+
+
 def build_fonts_css() -> str:
     """Emit @font-face blocks only for custom font files that actually exist."""
     fonts_dir = Path("static/localized/fonts")
@@ -117,6 +137,9 @@ def site_context(request=None) -> dict:
         "srcset": srcset,
         "site_name": SITE_NAME,
         "site_motto": SITE_MOTTO,
+        "site_description": SITE_DESCRIPTION,
+        # Canonical absolute URL for the home/static-page social-embed image.
+        "og_site_image": f"{BASE_DOMAIN}/og/site-thumbnail",
         "social_links": SOCIAL_LINKS,
         "base_domain": BASE_DOMAIN,
         "disclaimer": DISCLAIMER,

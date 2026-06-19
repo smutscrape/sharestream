@@ -24,6 +24,7 @@ from sharestream.routers import (
     auth,
     dmca,
     embeds,
+    filedrop,
     media,
     pages,
     public,
@@ -73,6 +74,7 @@ def create_app() -> FastAPI:
     app.include_router(media.router)
     app.include_router(embeds.router)
     app.include_router(dmca.router)
+    app.include_router(filedrop.router)
     app.include_router(pages.router)
     app.include_router(public.router)
     app.include_router(short_urls.router)  # MUST be included last
