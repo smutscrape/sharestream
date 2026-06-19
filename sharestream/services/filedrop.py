@@ -25,7 +25,9 @@ import asyncssh
 from sharestream.backends.stash import (
     add_tag_to_scene,
     find_scene_id_by_path,
+    metadata_generate,
     metadata_scan,
+    update_scene_metadata,
     wait_for_job,
 )
 from sharestream.config import (
@@ -41,6 +43,15 @@ from sharestream.config import (
 logger = logging.getLogger(__name__)
 
 _SAFE_CHARS_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def default_title(original_name: str) -> str:
+    """Title to use when the uploader didn't supply one: the ORIGINAL filename
+    minus its extension (Stash leaves title blank on scan, and sharestream's
+    gallery shows nothing without it)."""
+    base = os.path.basename(original_name or "").strip()
+    stem = base.rsplit(".", 1)[0] if "." in base else base
+    return stem.strip() or "Untitled"
 
 
 def sanitize_filename(name: str) -> str:
@@ -88,12 +99,21 @@ async def sftp_put(local_path: str, remote_name: str) -> str:
     return remote_path
 
 
-async def trigger_scan_and_tag(remote_name: str) -> dict:
-    """Scan the drop folder in Stash, locate the new scene, and tag it.
+async def trigger_scan_and_tag(remote_name: str, original_name: str,
+                               title: str | None = None,
+                               description: str | None = None) -> dict:
+    """Scan the drop folder, locate the new scene, set its title/details, tag it,
+    and kick off cover/preview/sprite generation.
 
-    Returns a status dict: ``{"status": "done"|"processing", "scene_id": int|None,
-    "tagged": bool}``. Best-effort after delivery — the bytes are already on the
-    Stash host, so a scan/lookup timeout returns "processing" rather than failing.
+    The title defaults to the original filename minus extension (Stash leaves it
+    blank on scan, and sharestream's gallery shows nothing without it); an
+    uploader-supplied title/description override/augment it. Generation is fired
+    so the scene gets a cover, preview clip, animated WebP, and sprites — without
+    it the scene looks blank in the gallery.
+
+    Returns ``{"status": "done"|"processing", "scene_id": int|None, "tagged": bool}``.
+    Best-effort after delivery — the bytes are already on the Stash host, so a
+    scan/lookup timeout returns "processing" rather than failing.
     """
     result = {"status": "processing", "scene_id": None, "tagged": False}
     job_id = await metadata_scan([FILEDROP_STASH_SCAN_PATH])
@@ -109,6 +129,15 @@ async def trigger_scan_and_tag(remote_name: str) -> dict:
 
     result["scene_id"] = scene_id
     result["status"] = "done"
+
+    effective_title = (title or "").strip() or default_title(original_name)
+    await update_scene_metadata(scene_id, title=effective_title,
+                                details=(description or "").strip() or None)
+
     if FILEDROP_TAG_ID:
         result["tagged"] = await add_tag_to_scene(scene_id, FILEDROP_TAG_ID)
+
+    # Generate cover/previews/animated WebP/sprites so the scene renders properly
+    # in the gallery. Fire-and-forget: we don't block the upload response on it.
+    await metadata_generate([scene_id])
     return result

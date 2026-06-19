@@ -74,7 +74,8 @@ async def filedrop_verify(request: Request, password: str = Form(...)):
 
 
 @router.post("/filedrop/upload")
-async def filedrop_upload(request: Request, file: UploadFile):
+async def filedrop_upload(request: Request, file: UploadFile,
+                          title: str = Form(""), description: str = Form("")):
     """Accept one uploaded video, deliver it to Stash, scan + tag it.
 
     Streams the body to a temp file (enforcing the size cap as it goes), SFTPs it
@@ -123,7 +124,8 @@ async def filedrop_upload(request: Request, file: UploadFile):
 
     # Delivery succeeded; scan + tag is best-effort (returns status either way).
     try:
-        outcome = await trigger_scan_and_tag(remote_name)
+        outcome = await trigger_scan_and_tag(remote_name, orig_name,
+                                             title=title, description=description)
     except Exception as e:
         logger.error(f"Filedrop scan/tag failed for '{remote_name}': {e}")
         outcome = {"status": "processing", "scene_id": None, "tagged": False}

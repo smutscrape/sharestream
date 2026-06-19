@@ -778,3 +778,67 @@ async def add_tag_to_scene(scene_id: int, tag_id: str) -> bool:
     except Exception as e:
         logger.error(f"Error tagging scene {scene_id} with tag {tag_id}: {e}")
         return False
+
+
+async def update_scene_metadata(scene_id: int, title: str | None = None,
+                                details: str | None = None) -> bool:
+    """Set a scene's title and/or details. Omitted/blank fields are left as-is."""
+    fields = {"id": str(scene_id)}
+    if title:
+        fields["title"] = title
+    if details:
+        fields["details"] = details
+    if len(fields) == 1:  # nothing to update beyond the id
+        return True
+    query = {
+        "operationName": "SceneUpdate",
+        "variables": {"input": fields},
+        "query": "mutation SceneUpdate($input: SceneUpdateInput!) { sceneUpdate(input: $input) { id } }",
+    }
+    try:
+        r = await http_client.post(GRAPHQL_URL, json=query, headers=_graphql_headers())
+        r.raise_for_status()
+        d = r.json()
+        if d.get("errors"):
+            logger.error(f"GraphQL error updating scene {scene_id} metadata: {d['errors']}")
+            return False
+        logger.info(f"Updated metadata for scene {scene_id} (title={'y' if title else 'n'}, details={'y' if details else 'n'})")
+        return True
+    except Exception as e:
+        logger.error(f"Error updating scene {scene_id} metadata: {e}")
+        return False
+
+
+async def metadata_generate(scene_ids: list[int]) -> str | None:
+    """Generate cover, previews, animated image preview, and sprites/thumbnails
+    for the given scenes. Returns the job id, or None on error.
+
+    Without this a freshly-scanned scene has no cover/preview, so it looks blank
+    in the gallery and has no animated WebP for hover/collection thumbnails.
+    """
+    query = {
+        "operationName": "MetadataGenerate",
+        "variables": {"input": {
+            "sceneIDs": [str(s) for s in scene_ids],
+            "covers": True,
+            "previews": True,
+            "imagePreviews": True,   # animated WebP preview
+            "sprites": True,
+            "phashes": True,
+            "clipPreviews": True,
+        }},
+        "query": "mutation MetadataGenerate($input: GenerateMetadataInput!) { metadataGenerate(input: $input) }",
+    }
+    try:
+        response = await http_client.post(GRAPHQL_URL, json=query, headers=_graphql_headers())
+        response.raise_for_status()
+        data = response.json()
+        if data.get("errors"):
+            logger.error(f"GraphQL error starting metadata generate: {data['errors']}")
+            return None
+        job_id = data.get("data", {}).get("metadataGenerate")
+        logger.info(f"Started Stash metadata generate job {job_id} for scenes={scene_ids}")
+        return job_id
+    except Exception as e:
+        logger.error(f"Error starting metadata generate: {e}")
+        return None
