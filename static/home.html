@@ -39,7 +39,7 @@
         
         <!-- Tag Collections Section -->
         {% if tag_cards %}
-        <h2>Collections</h2>
+        <h2>Featured Collections</h2>
         <div class="gallery tag-gallery" id="tag-gallery">
             {% for tag in tag_cards %}
             <div class="video-card tag-collection" data-webps='{{ tag.preview_webps | tojson }}'>
