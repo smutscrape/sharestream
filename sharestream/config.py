@@ -78,6 +78,18 @@ if EMBED_MODE not in VALID_EMBED_MODES:
 EMBED_MAX_FULL_DURATION = EMBED_CONFIG.get('max_full_duration')  # seconds or None
 EMBED_MAX_FULL_SIZE_MB = EMBED_CONFIG.get('max_full_size_mb')    # megabytes or None
 
+# Gallery layout policy.
+# - home_masonry: when true, the home page "All Videos" gallery (the individual
+#   video cards below the featured collections) uses the masonry layout that
+#   preserves each video's native aspect ratio instead of the cropped grid.
+# - masonry_default: the default state of the admin "Gallery mode?" toggle when
+#   creating a tag share. false = opt-in (toggle starts off); true = opt-out
+#   (toggle starts on, so new shares are masonry unless unchecked). Existing
+#   shares keep whatever was stored; this only sets the new-share default.
+GALLERY_CONFIG = config.get('gallery', {}) or {}
+GALLERY_HOME_MASONRY = bool(GALLERY_CONFIG.get('home_masonry', False))
+GALLERY_MASONRY_DEFAULT = bool(GALLERY_CONFIG.get('masonry_default', False))
+
 # Caching policy. Tag membership checks (does video X belong to shared tag Y?)
 # are cached per tag for this many minutes to avoid re-querying Stash on every
 # media request. Defaults to 15 minutes when unset/invalid.

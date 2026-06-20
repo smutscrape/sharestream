@@ -57,7 +57,8 @@ def segment_url(stash_video_id: int, segment: str, resolution: str) -> str:
 # GraphQL queries
 # ------------------------------------------------------------------
 async def get_scene_meta(video_ids: list[int]) -> dict[int, dict]:
-    """Batch-fetch {id: {rating, date, created_at}} for the given scene IDs."""
+    """Batch-fetch {id: {rating, date, created_at, duration, resolution}} for the
+    given scene IDs. ``resolution`` is a "WxH" string (or None) for masonry."""
     if not video_ids:
         return {}
 
@@ -74,6 +75,8 @@ async def get_scene_meta(video_ids: list[int]) -> dict[int, dict]:
                         created_at
                         files {
                             duration
+                            width
+                            height
                         }
                     }
                 }
@@ -91,12 +94,19 @@ async def get_scene_meta(video_ids: list[int]) -> dict[int, dict]:
             return {}
 
         scenes = data.get("data", {}).get("findScenes", {}).get("scenes", [])
+        def _res(scene):
+            f = (scene.get("files") or [{}])[0]
+            if f.get("width") and f.get("height"):
+                return f"{f['width']}x{f['height']}"
+            return None
+
         return {
             int(scene["id"]): {
                 "rating": scene.get("rating100"),
                 "date": scene.get("date"),
                 "created_at": scene.get("created_at"),
                 "duration": (scene.get("files") or [{}])[0].get("duration"),
+                "resolution": _res(scene),
             }
             for scene in scenes
         }

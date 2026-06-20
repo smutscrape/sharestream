@@ -60,6 +60,19 @@ embed:
   max_full_duration: 60   # seconds (null/omit to ignore this limit)
   max_full_size_mb: 50    # megabytes (null/omit to ignore this limit)
 
+# Gallery layout policy. Both default to false (omit the whole section to keep
+# the classic cropped grid everywhere).
+gallery:
+  # When true, the home page "All Videos" gallery (the individual video cards
+  # below the featured collections) uses a masonry layout that keeps each
+  # video's native aspect ratio, instead of cropping all cards to one shape.
+  home_masonry: false
+  # Default state of the admin "Gallery mode?" toggle when creating a tag share.
+  # false = opt-in (new shares are standard grid unless you tick the box);
+  # true = opt-out (new shares are masonry unless you untick it). This only sets
+  # the default for NEW shares — existing shares keep whatever was saved.
+  masonry_default: false
+
 # Caching policy.
 # Media requests (thumbnails, HLS segments, previews, mp4/webp) verify that a
 # requested video belongs to a shared tag before proxying it from Stash. That

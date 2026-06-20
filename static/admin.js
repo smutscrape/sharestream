@@ -94,10 +94,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function showAdmin() {
         loginSection.style.display = 'none';
-        adminContent.style.display = 'flex'; 
+        adminContent.style.display = 'flex';
         loginError.textContent = '';
         fetchSharedContent();
         setBaseDomain();
+        applyAdminSettings();
+    }
+
+    // Pull operator config and seed UI defaults that depend on it. Currently just
+    // the default state of the create-form "Gallery mode?" toggle (masonry_default
+    // in config.yaml): false = opt-in (off), true = opt-out (on).
+    async function applyAdminSettings() {
+        try {
+            const settings = await apiRequest('/admin_settings');
+            if (tagGalleryModeInput && settings && typeof settings.masonry_default === 'boolean') {
+                tagGalleryModeInput.checked = settings.masonry_default;
+            }
+        } catch (e) {
+            // Non-fatal: the checkbox keeps its HTML default (unchecked).
+        }
     }
 
     function clearMessages() {

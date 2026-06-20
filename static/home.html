@@ -79,10 +79,10 @@
         </div>
         
         <!-- All Videos Section -->
-        <div class="gallery videos-gallery" id="videos-gallery">
+        <div class="gallery videos-gallery{% if home_gallery_masonry %} gallery-masonry{% endif %}" id="videos-gallery">
             <!-- Videos (now a single combined list) -->
             {% for video in all_video_cards %}
-            <div class="video-card" data-preview-url="{{ video.preview_url }}">
+            <div class="video-card" data-preview-url="{{ video.preview_url }}"{% if home_gallery_masonry and video.aspect %} style="--card-aspect: {{ '%.4f'|format(video.aspect) }}"{% endif %}>
                 <a href="{{ video.share_url }}">
                     <div class="thumb">
                         <img src="{{ video.thumbnail_url or '/static/default_thumbnail.jpg' }}" 
@@ -142,7 +142,8 @@
         
         {% include "footer.html" %}
     </div>
-    
+
+    {% if home_gallery_masonry %}<script src="/static/gallery-masonry.js" defer></script>{% endif %}
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             // Sorting dropdown logic

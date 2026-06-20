@@ -23,7 +23,7 @@ from sharestream.backends.stash import (
     get_tag_description,
     get_videos_by_tag,
 )
-from sharestream.config import BASE_DOMAIN, VALID_SORTS
+from sharestream.config import BASE_DOMAIN, GALLERY_HOME_MASONRY, VALID_SORTS
 from sharestream.core.branding import site_context
 from sharestream.db.models import SharedTag, SharedVideo
 from sharestream.services.access import tag_share_respects_limit_tag
@@ -258,7 +258,8 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
             "duration_label": format_duration(m.get("duration")),
             "stash_video_id": video.stash_video_id,
             "rating": m.get("rating") or 0,
-            "sort_date": effective_sort_date(m.get("date"), m.get("created_at"))
+            "sort_date": effective_sort_date(m.get("date"), m.get("created_at")),
+            "aspect": parse_aspect(m.get("resolution")),
         })
 
     # Add videos from tag shares (avoiding duplicates)
@@ -280,7 +281,8 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
                 "duration_label": format_duration(video_data.get("duration")),
                 "stash_video_id": video_id,
                 "rating": video_data.get("rating", 0) or 0,
-                "sort_date": effective_sort_date(video_data.get("date"), video_data.get("created_at"))
+                "sort_date": effective_sort_date(video_data.get("date"), video_data.get("created_at")),
+                "aspect": parse_aspect(video_data.get("resolution")),
             })
 
     # 4. Sort the combined list
@@ -339,6 +341,7 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
         prev_page_url=f"/?page={page-1}&sort={sort}" if page > 1 else None,
         next_page_url=f"/?page={page+1}&sort={sort}" if has_more_pages else None,
         sort=sort,
+        home_gallery_masonry=GALLERY_HOME_MASONRY,
     )
     return context
 

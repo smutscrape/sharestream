@@ -10,7 +10,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from sharestream.backends.stash import fetch_scene_title
-from sharestream.config import BASE_DOMAIN
+from sharestream.config import BASE_DOMAIN, GALLERY_MASONRY_DEFAULT
 from sharestream.core.security import get_current_user
 from sharestream.db.models import SharedTag, SharedVideo
 from sharestream.db.session import get_db
@@ -33,6 +33,13 @@ async def clear_cache(current_user: str = Depends(get_current_user)):
     # share immediately reflects the change instead of waiting out the TTL).
     evicted = clear_tag_membership_cache()
     return {"detail": f"Cleared tag membership cache ({evicted} tag(s)).", "evicted": evicted}
+
+
+@router.get("/admin_settings")
+async def admin_settings(current_user: str = Depends(get_current_user)):
+    """Operator config the admin UI needs at load time (e.g. the default state of
+    the per-share 'Gallery mode?' toggle for new shares)."""
+    return {"masonry_default": GALLERY_MASONRY_DEFAULT}
 
 
 @router.get("/get_video_title/{stash_id}")
