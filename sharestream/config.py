@@ -110,8 +110,25 @@ FILEDROP_ENABLED = bool(FILEDROP_CONFIG.get('enabled', False))
 # Optional shared password (plaintext here by design); empty/unset = open page.
 FILEDROP_PASSWORD = str(FILEDROP_CONFIG.get('password', '') or '')
 # Optional Stash tag id applied to every ingested scene; empty/None = no tag.
+# Retained only as a back-compat input for FILEDROP_NEW_UPLOAD_TAGS below.
 _filedrop_tag = FILEDROP_CONFIG.get('tag_id')
 FILEDROP_TAG_ID = str(_filedrop_tag) if _filedrop_tag not in (None, '') else None
+# List of Stash tag ids applied to every ingested scene. Supersedes the single
+# `tag_id`; when `new_upload_tags` is absent we fall back to [tag_id] so existing
+# configs keep working.
+_new_upload_tags = FILEDROP_CONFIG.get('new_upload_tags')
+if _new_upload_tags in (None, ''):
+    FILEDROP_NEW_UPLOAD_TAGS = [FILEDROP_TAG_ID] if FILEDROP_TAG_ID else []
+else:
+    if not isinstance(_new_upload_tags, (list, tuple)):
+        _new_upload_tags = [_new_upload_tags]
+    FILEDROP_NEW_UPLOAD_TAGS = [str(t) for t in _new_upload_tags if t not in (None, '')]
+# When an upload is NOT auto-viewable via a public tag, optionally mint a
+# password-protected SharedVideo (random password) on completion.
+FILEDROP_AUTO_SHARE = bool(FILEDROP_CONFIG.get('auto_share_uploads', False))
+# When true, the upload UI shows a tag picker and the server accepts the
+# uploader's own tag choices (restricted to the public-tag vocabulary).
+FILEDROP_ALLOW_USER_TAGS = bool(FILEDROP_CONFIG.get('allow_user_tags', False))
 # SSH/SFTP delivery to the box hosting Stash's library.
 FILEDROP_SSH_HOST = str(FILEDROP_CONFIG.get('ssh_host', '') or '')
 FILEDROP_SSH_USER = str(FILEDROP_CONFIG.get('ssh_user', '') or '')

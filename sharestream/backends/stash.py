@@ -743,8 +743,15 @@ async def find_scene_id_by_path(path: str) -> int | None:
         return None
 
 
-async def add_tag_to_scene(scene_id: int, tag_id: str) -> bool:
-    """Add ``tag_id`` to a scene's existing tags (never clobbering the others)."""
+async def add_tags_to_scene(scene_id: int, tag_ids: list[str]) -> bool:
+    """Union ``tag_ids`` into a scene's existing tags (never clobbering others).
+
+    No-op success when ``tag_ids`` is empty. Reads the scene's current tags, adds
+    the new ids, and writes them back in one SceneUpdate.
+    """
+    wanted = {str(t) for t in tag_ids if t not in (None, "")}
+    if not wanted:
+        return True
     # 1. Read current tag ids so we union rather than overwrite.
     read_q = {
         "operationName": "FindScene",
@@ -759,12 +766,12 @@ async def add_tag_to_scene(scene_id: int, tag_id: str) -> bool:
             logger.error(f"GraphQL error reading scene {scene_id} tags: {d['errors']}")
             return False
         scene = (d.get("data") or {}).get("findScene") or {}
-        tag_ids = {str(t["id"]) for t in scene.get("tags", [])}
-        tag_ids.add(str(tag_id))
+        merged = {str(t["id"]) for t in scene.get("tags", [])}
+        merged |= wanted
 
         upd_q = {
             "operationName": "SceneUpdate",
-            "variables": {"input": {"id": str(scene_id), "tag_ids": sorted(tag_ids)}},
+            "variables": {"input": {"id": str(scene_id), "tag_ids": sorted(merged)}},
             "query": "mutation SceneUpdate($input: SceneUpdateInput!) { sceneUpdate(input: $input) { id } }",
         }
         r2 = await http_client.post(GRAPHQL_URL, json=upd_q, headers=_graphql_headers())
@@ -773,11 +780,56 @@ async def add_tag_to_scene(scene_id: int, tag_id: str) -> bool:
         if d2.get("errors"):
             logger.error(f"GraphQL error tagging scene {scene_id}: {d2['errors']}")
             return False
-        logger.info(f"Tagged scene {scene_id} with tag {tag_id}")
+        logger.info(f"Tagged scene {scene_id} with tags {sorted(wanted)}")
         return True
     except Exception as e:
-        logger.error(f"Error tagging scene {scene_id} with tag {tag_id}: {e}")
+        logger.error(f"Error tagging scene {scene_id} with tags {sorted(wanted)}: {e}")
         return False
+
+
+async def add_tag_to_scene(scene_id: int, tag_id: str) -> bool:
+    """Add a single ``tag_id`` to a scene's existing tags (never clobbering them)."""
+    return await add_tags_to_scene(scene_id, [tag_id])
+
+
+async def get_tags_for_scenes(scene_ids: list[int]) -> dict[int, list[dict]]:
+    """Batch-fetch {scene_id: [{id, name}, ...]} for the given scenes.
+
+    Tags equal to ``LIMIT_TO_TAG`` are filtered out so the global gate tag never
+    appears as a user-facing/assignable tag.
+    """
+    if not scene_ids:
+        return {}
+    query = {
+        "operationName": "FindScenes",
+        "variables": {"scene_ids": [int(s) for s in scene_ids]},
+        "query": """
+            query FindScenes($scene_ids: [Int!]) {
+                findScenes(scene_ids: $scene_ids) {
+                    scenes { id tags { id name } }
+                }
+            }
+        """,
+    }
+    try:
+        response = await http_client.post(GRAPHQL_URL, json=query, headers=_graphql_headers())
+        response.raise_for_status()
+        data = response.json()
+        if data.get("errors"):
+            logger.error(f"GraphQL error getting tags for scenes: {data['errors']}")
+            return {}
+        scenes = data.get("data", {}).get("findScenes", {}).get("scenes", [])
+        out: dict[int, list[dict]] = {}
+        for scene in scenes:
+            out[int(scene["id"])] = [
+                {"id": str(t["id"]), "name": t["name"]}
+                for t in scene.get("tags", [])
+                if not (LIMIT_TO_TAG and str(t.get("id")) == str(LIMIT_TO_TAG))
+            ]
+        return out
+    except Exception as e:
+        logger.error(f"Error getting tags for scenes: {e}")
+        return {}
 
 
 async def update_scene_metadata(scene_id: int, title: str | None = None,

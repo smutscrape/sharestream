@@ -54,11 +54,55 @@
         }
         .upload-item textarea { resize: vertical; min-height: 48px; }
         .upload-item input:focus, .upload-item textarea:focus { outline: none; border-color: #ff2a6d; }
-        .detail-row { margin-top: 10px; display: flex; gap: 10px; align-items: center; }
+        .detail-row { margin-top: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
         .detail-row button { padding: 8px 16px; white-space: nowrap; }
-        .detail-row button[disabled] { opacity: 0.5; cursor: not-allowed; }
+        .detail-row button[disabled] { opacity: 0.6; cursor: not-allowed; }
+        .detail-row button.completed { background: #14532d; border-color: #4ade80; color: #4ade80; }
         .save-note { font-size: 0.8rem; opacity: 0.75; }
         .save-note.saved { color: #4ade80; }
+        .save-note.error { color: #ff6b6b; }
+        .result-link { display: block; margin-top: 10px; font-size: 0.9rem; }
+        .result-link a { color: #ff6ec7; font-weight: 600; text-decoration: none; }
+        .result-link a:hover { text-decoration: underline; }
+        .result-link .pwd-note { display: block; font-size: 0.78rem; opacity: 0.7; margin-top: 3px; word-break: break-all; }
+
+        /* Tag picker: a chip-styled text box with an autocomplete dropdown. */
+        .tag-picker { position: relative; }
+        .tag-box {
+            display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+            min-height: 38px; padding: 6px 8px; box-sizing: border-box;
+            background: rgba(10, 5, 20, 0.6);
+            border: 1px solid rgba(255, 0, 128, 0.3); border-radius: 6px;
+            cursor: text;
+        }
+        .tag-box.focused { border-color: #ff2a6d; }
+        .tag-chip {
+            display: inline-flex; align-items: center; gap: 6px;
+            background: rgba(255, 0, 128, 0.18); color: #f6d9ec;
+            border: 1px solid rgba(255, 0, 128, 0.4);
+            border-radius: 999px; padding: 3px 6px 3px 10px; font-size: 0.82rem;
+        }
+        .tag-chip .x {
+            cursor: pointer; font-weight: 700; line-height: 1; opacity: 0.8;
+            border: none; background: none; color: inherit; padding: 0 2px;
+        }
+        .tag-chip .x:hover { opacity: 1; }
+        .tag-input {
+            flex: 1; min-width: 80px; border: none !important; background: none !important;
+            padding: 4px 2px !important; color: #f0e6f5; font-family: inherit; font-size: 0.9rem;
+        }
+        .tag-input:focus { outline: none; }
+        .tag-suggestions {
+            position: absolute; left: 0; right: 0; top: 100%; z-index: 30;
+            margin-top: 4px; max-height: 220px; overflow-y: auto;
+            background: #1a0d26; border: 1px solid rgba(255, 0, 128, 0.4);
+            border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+            display: none;
+        }
+        .tag-suggestions.open { display: block; }
+        .tag-suggestion { padding: 8px 12px; font-size: 0.88rem; cursor: pointer; color: #e8d7f0; }
+        .tag-suggestion.active, .tag-suggestion:hover { background: rgba(255, 0, 128, 0.2); }
+        .tag-suggestions .empty { padding: 8px 12px; font-size: 0.82rem; opacity: 0.6; }
     </style>
 </head>
 <body>
@@ -86,7 +130,7 @@
         {% else %}
         <div class="admin-section filedrop-section">
             <h2>Upload Files</h2>
-            <p style="color:#c8b3d4; margin-bottom:16px;">Drop video files below — uploading starts right away. Add a title &amp; description while they process.</p>
+            <p style="color:#c8b3d4; margin-bottom:16px;">Drop video files below — uploading starts right away. Add a title, description{% if allow_user_tags %}, and tags{% endif %} while they process, then press <strong>Complete Upload</strong>.</p>
             <div class="dropzone" id="dropzone">
                 <p><strong>Drag &amp; drop</strong> files here</p>
                 <p class="hint">or click to choose &middot; max {{ max_upload_mb }} MB each</p>
@@ -108,6 +152,17 @@
             const list = document.getElementById('upload-list');
             const MAX_MB = {{ max_upload_mb }};
             const ALLOWED = {{ allowed_exts | tojson }};
+            const ALLOW_USER_TAGS = {{ 'true' if allow_user_tags else 'false' }};
+
+            // Public-tag vocabulary for the autocomplete, fetched once and shared
+            // by every card's tag picker. [{id, name}, ...].
+            let tagVocab = [];
+            if (ALLOW_USER_TAGS) {
+                fetch('/filedrop/tags', { credentials: 'same-origin' })
+                    .then(r => r.ok ? r.json() : { tags: [] })
+                    .then(d => { tagVocab = d.tags || []; })
+                    .catch(() => { tagVocab = []; });
+            }
 
             dropzone.addEventListener('click', () => fileInput.click());
             ['dragenter', 'dragover'].forEach(ev =>
@@ -126,17 +181,18 @@
                 return i > 0 ? name.slice(0, i) : name;
             }
 
-            // Uploads start IMMEDIATELY when files are chosen/dropped. The title
-            // defaults server-side to the filename; the title/description fields
-            // appear once upload completes so the uploader can refine them and
-            // press "Save details" (which patches the already-created scene).
+            // Uploads start IMMEDIATELY when files are chosen/dropped. The
+            // title/description (and tag picker) fields are shown right away so
+            // the uploader can fill them in while the bytes upload. Pressing
+            // "Complete Upload" waits for the upload+scan to finish if needed,
+            // then patches the scene with the final title/description/tags.
             // One upload runs at a time so we don't saturate SFTP / Stash scans.
             let chain = Promise.resolve();
             function handleFiles(files) {
                 for (const file of files) {
                     const card = makeCard(file);
                     if (card.rejected) continue;
-                    chain = chain.then(() => uploadOne(file, card));
+                    card.uploadPromise = chain = chain.then(() => uploadOne(file, card));
                 }
                 fileInput.value = '';
             }
@@ -148,15 +204,22 @@
                     <div class="name"></div>
                     <div class="progress-track"><div class="progress-bar"></div></div>
                     <div class="status">Queued…</div>
-                    <div class="details" style="display:none;">
+                    <div class="details">
                         <label>Title</label>
                         <input type="text" class="title-input">
                         <label>Description (optional)</label>
                         <textarea class="desc-input" rows="2"></textarea>
+                        ${ALLOW_USER_TAGS ? `
+                        <label>Tags (optional)</label>
+                        <div class="tag-picker">
+                            <div class="tag-box"><input type="text" class="tag-input" placeholder="Type to search tags…" autocomplete="off"></div>
+                            <div class="tag-suggestions"></div>
+                        </div>` : ''}
                         <div class="detail-row">
-                            <button type="button" class="save-button">Save details</button>
+                            <button type="button" class="save-button">Complete Upload</button>
                             <span class="save-note"></span>
                         </div>
+                        <div class="result-link" style="display:none;"></div>
                     </div>`;
                 li.querySelector('.name').textContent = file.name;
                 list.appendChild(li);
@@ -169,13 +232,23 @@
                     desc: li.querySelector('.desc-input'),
                     saveBtn: li.querySelector('.save-button'),
                     saveNote: li.querySelector('.save-note'),
+                    resultLink: li.querySelector('.result-link'),
+                    sceneId: null,
+                    uploadDone: false,
+                    uploadOk: false,
+                    completed: false,
+                    selectedTags: [],   // [{id, name}]
                     rejected: false,
                 };
                 card.title.value = stripExt(file.name);
+                if (ALLOW_USER_TAGS) wireTagPicker(card);
+                wireComplete(card);
                 if (!ALLOWED.includes(extOf(file.name))) {
                     fail(card, 'Rejected: file type not allowed'); card.rejected = true;
+                    card.details.style.display = 'none';
                 } else if (file.size > MAX_MB * 1024 * 1024) {
                     fail(card, `Rejected: exceeds ${MAX_MB} MB`); card.rejected = true;
+                    card.details.style.display = 'none';
                 }
                 return card;
             }
@@ -199,20 +272,20 @@
                         }
                     });
                     xhr.addEventListener('load', () => {
+                        card.uploadDone = true;
                         if (xhr.status >= 200 && xhr.status < 300) {
                             let data = {};
                             try { data = JSON.parse(xhr.responseText); } catch (e) {}
                             card.bar.style.width = '100%';
-                            card.sceneId = data.scene_id;
-                            card.status.textContent = data.status === 'done'
-                                ? `Added to Stash (scene #${data.scene_id}${data.tagged ? ', tagged' : ''})`
+                            card.sceneId = data.scene_id || null;
+                            card.uploadOk = true;
+                            card.status.textContent = data.scene_id
+                                ? 'Uploaded — ready to complete'
                                 : 'Uploaded — Stash is still processing it';
                             card.status.className = 'status done';
-                            // Reveal the title/description editor now that a scene exists.
-                            if (data.scene_id) {
-                                card.details.style.display = 'block';
-                                wireSave(card);
-                            }
+                            // If the user already pressed Complete and is waiting,
+                            // resume the completion now that the scene exists.
+                            if (card.pendingComplete) { card.pendingComplete = false; doComplete(card); }
                         } else {
                             let msg = `Failed (${xhr.status})`;
                             try { msg = JSON.parse(xhr.responseText).detail || msg; } catch (e) {}
@@ -220,29 +293,185 @@
                         }
                         resolve();
                     });
-                    xhr.addEventListener('error', () => { fail(card, 'Network error'); resolve(); });
+                    xhr.addEventListener('error', () => { card.uploadDone = true; fail(card, 'Network error'); resolve(); });
                     xhr.send(fd);
                 });
             }
 
-            function wireSave(card) {
+            function wireComplete(card) {
                 card.saveBtn.addEventListener('click', () => {
+                    if (card.completed) return;
                     card.saveBtn.disabled = true;
-                    card.saveNote.textContent = 'Saving…';
-                    card.saveNote.className = 'save-note';
-                    const fd = new FormData();
-                    fd.append('scene_id', card.sceneId);
-                    fd.append('title', card.title.value.trim());
-                    fd.append('description', card.desc.value.trim());
-                    fetch('/filedrop/details', { method: 'POST', body: fd })
-                        .then(r => {
-                            if (!r.ok) throw new Error('HTTP ' + r.status);
-                            card.saveNote.textContent = 'Saved';
-                            card.saveNote.className = 'save-note saved';
-                        })
-                        .catch(() => { card.saveNote.textContent = 'Save failed'; card.saveNote.className = 'save-note'; })
-                        .finally(() => { card.saveBtn.disabled = false; });
+                    if (!card.uploadDone) {
+                        // Upload still running — finish it first, then complete.
+                        card.pendingComplete = true;
+                        card.saveNote.textContent = 'Waiting for upload to finish…';
+                        card.saveNote.className = 'save-note';
+                        return;
+                    }
+                    doComplete(card);
                 });
+            }
+
+            function doComplete(card) {
+                if (!card.uploadOk || !card.sceneId) {
+                    card.saveNote.textContent = card.uploadOk
+                        ? 'Still processing on server — try again in a moment'
+                        : 'Upload failed — cannot complete';
+                    card.saveNote.className = 'save-note error';
+                    card.saveBtn.disabled = false;
+                    return;
+                }
+                card.saveBtn.disabled = true;
+                card.saveNote.textContent = 'Finishing…';
+                card.saveNote.className = 'save-note';
+                const fd = new FormData();
+                fd.append('scene_id', card.sceneId);
+                fd.append('title', card.title.value.trim());
+                fd.append('description', card.desc.value.trim());
+                for (const t of card.selectedTags) fd.append('tags', t.id);
+                fetch('/filedrop/details', { method: 'POST', body: fd, credentials: 'same-origin' })
+                    .then(r => r.ok ? r.json() : r.json().then(d => Promise.reject(d)))
+                    .then(data => {
+                        card.completed = true;
+                        card.saveBtn.textContent = '✓ Completed';
+                        card.saveBtn.classList.add('completed');
+                        card.saveBtn.disabled = true;
+                        card.saveNote.textContent = 'Upload complete';
+                        card.saveNote.className = 'save-note saved';
+                        showResult(card, data);
+                    })
+                    .catch(err => {
+                        const msg = (err && err.detail) ? err.detail : 'Save failed';
+                        card.saveNote.textContent = msg;
+                        card.saveNote.className = 'save-note error';
+                        card.saveBtn.disabled = false;
+                    });
+            }
+
+            function showResult(card, data) {
+                if (data.published && data.view_url) {
+                    card.resultLink.innerHTML =
+                        `<a href="${data.view_url}" target="_blank" rel="noopener">View your upload →</a>`;
+                    card.resultLink.style.display = 'block';
+                } else if (data.share_url) {
+                    const pwd = data.password ? `<span class="pwd-note">Password: ${data.password}</span>` : '';
+                    card.resultLink.innerHTML =
+                        `<a href="${data.share_url}" target="_blank" rel="noopener">Your private link →</a>${pwd}`;
+                    card.resultLink.style.display = 'block';
+                }
+            }
+
+            // ---- Tag picker (chips + autocomplete) ----
+            function wireTagPicker(card) {
+                const picker = card.li.querySelector('.tag-picker');
+                const box = picker.querySelector('.tag-box');
+                const input = picker.querySelector('.tag-input');
+                const suggestions = picker.querySelector('.tag-suggestions');
+                card.tagBox = box;
+                card.tagInput = input;
+                card.tagSuggestions = suggestions;
+                card.activeIdx = -1;
+
+                box.addEventListener('click', () => input.focus());
+                input.addEventListener('focus', () => box.classList.add('focused'));
+                input.addEventListener('blur', () => {
+                    box.classList.remove('focused');
+                    // Delay so a click on a suggestion registers before we hide it.
+                    setTimeout(() => closeSuggestions(card), 150);
+                });
+                input.addEventListener('input', () => renderSuggestions(card));
+                input.addEventListener('keydown', e => onTagKey(card, e));
+            }
+
+            function currentMatches(card) {
+                const q = card.tagInput.value.trim().toLowerCase();
+                const chosen = new Set(card.selectedTags.map(t => t.id));
+                let list = tagVocab.filter(t => !chosen.has(t.id));
+                if (q) list = list.filter(t => t.name.toLowerCase().includes(q));
+                return list.slice(0, 50);
+            }
+
+            function renderSuggestions(card) {
+                const matches = currentMatches(card);
+                const q = card.tagInput.value.trim();
+                card.activeIdx = matches.length ? 0 : -1;
+                if (!q && !matches.length) { closeSuggestions(card); return; }
+                if (!matches.length) {
+                    card.tagSuggestions.innerHTML = '<div class="empty">No matching tags</div>';
+                } else {
+                    card.tagSuggestions.innerHTML = matches.map((t, i) =>
+                        `<div class="tag-suggestion${i === card.activeIdx ? ' active' : ''}" data-id="${t.id}">${escapeHtml(t.name)}</div>`
+                    ).join('');
+                    card.tagSuggestions.querySelectorAll('.tag-suggestion').forEach(el => {
+                        el.addEventListener('mousedown', e => {
+                            e.preventDefault();
+                            const t = matches.find(m => m.id === el.dataset.id);
+                            if (t) addTag(card, t);
+                        });
+                    });
+                }
+                card.tagSuggestions.classList.add('open');
+            }
+
+            function closeSuggestions(card) {
+                card.tagSuggestions.classList.remove('open');
+                card.tagSuggestions.innerHTML = '';
+                card.activeIdx = -1;
+            }
+
+            function onTagKey(card, e) {
+                const matches = currentMatches(card);
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (matches.length) { card.activeIdx = (card.activeIdx + 1) % matches.length; highlight(card, matches); }
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (matches.length) { card.activeIdx = (card.activeIdx - 1 + matches.length) % matches.length; highlight(card, matches); }
+                } else if (e.key === 'Enter' || e.key === 'Tab') {
+                    if (card.activeIdx >= 0 && matches[card.activeIdx]) {
+                        e.preventDefault();
+                        addTag(card, matches[card.activeIdx]);
+                    }
+                    // No highlighted match: let Tab move focus / Enter do nothing.
+                } else if (e.key === 'Backspace' && !card.tagInput.value && card.selectedTags.length) {
+                    removeTag(card, card.selectedTags[card.selectedTags.length - 1].id);
+                } else if (e.key === 'Escape') {
+                    closeSuggestions(card);
+                }
+            }
+
+            function highlight(card, matches) {
+                const els = card.tagSuggestions.querySelectorAll('.tag-suggestion');
+                els.forEach((el, i) => el.classList.toggle('active', i === card.activeIdx));
+                const active = els[card.activeIdx];
+                if (active) active.scrollIntoView({ block: 'nearest' });
+            }
+
+            function addTag(card, tag) {
+                if (card.selectedTags.some(t => t.id === tag.id)) return;
+                card.selectedTags.push(tag);
+                const chip = document.createElement('span');
+                chip.className = 'tag-chip';
+                chip.dataset.id = tag.id;
+                chip.innerHTML = `${escapeHtml(tag.name)}<button type="button" class="x" aria-label="Remove">×</button>`;
+                chip.querySelector('.x').addEventListener('click', () => removeTag(card, tag.id));
+                card.tagBox.insertBefore(chip, card.tagInput);
+                card.tagInput.value = '';
+                renderSuggestions(card);
+                card.tagInput.focus();
+            }
+
+            function removeTag(card, id) {
+                card.selectedTags = card.selectedTags.filter(t => t.id !== id);
+                const chip = card.tagBox.querySelector(`.tag-chip[data-id="${CSS.escape(id)}"]`);
+                if (chip) chip.remove();
+                card.tagInput.focus();
+            }
+
+            function escapeHtml(s) {
+                return String(s).replace(/[&<>"']/g, c =>
+                    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
             }
         })();
     </script>

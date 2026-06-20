@@ -6,7 +6,7 @@ Stash has no byte-upload API, so the flow is:
      Stash watches (``FILEDROP_HOST_DIR`` on ``FILEDROP_SSH_HOST``);
   3. :func:`trigger_scan_and_tag` runs a Stash ``metadataScan`` of the SAME folder
      as Stash sees it (``FILEDROP_STASH_SCAN_PATH``), waits for the job, finds the
-     new scene by its path, and applies ``FILEDROP_TAG_ID`` if configured.
+     new scene by its path, and applies ``FILEDROP_NEW_UPLOAD_TAGS`` if configured.
 
 Path note: bytes are written to the HOST path; the scan + scene lookup use the
 STASH-visible path (these differ when Stash runs in a container with a bind
@@ -14,17 +14,23 @@ mount). Both come from config.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import posixpath
 import re
 import secrets
+import time
+from threading import Lock
 
 import asyncssh
+from sqlalchemy.orm import Session
 
 from sharestream.backends.stash import (
-    add_tag_to_scene,
+    add_tags_to_scene,
     find_scene_id_by_path,
+    get_all_videos_by_tag,
+    get_tags_for_scenes,
     metadata_generate,
     metadata_scan,
     update_scene_metadata,
@@ -32,17 +38,27 @@ from sharestream.backends.stash import (
 )
 from sharestream.config import (
     FILEDROP_HOST_DIR,
+    FILEDROP_NEW_UPLOAD_TAGS,
     FILEDROP_SSH_HOST,
     FILEDROP_SSH_KEY,
     FILEDROP_SSH_PORT,
     FILEDROP_SSH_USER,
     FILEDROP_STASH_SCAN_PATH,
-    FILEDROP_TAG_ID,
+    LIMIT_TO_TAG,
 )
+from sharestream.db.models import SharedTag, SharedVideo
+from sharestream.services.access import tag_share_respects_limit_tag
 
 logger = logging.getLogger(__name__)
 
 _SAFE_CHARS_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+# Public-tag vocabulary cache: the set of tags that are already publicly
+# browsable (carried by a video in any no-password share). TTL-cached so the
+# autocomplete endpoint doesn't re-scan every share's Stash contents per request.
+_VOCAB_TTL_SECONDS = 600.0
+_vocab_cache: dict | None = None  # {"expires": float, "tags": list[{id,name}]}
+_vocab_lock = Lock()
 
 
 def default_title(original_name: str) -> str:
@@ -134,10 +150,96 @@ async def trigger_scan_and_tag(remote_name: str, original_name: str,
     await update_scene_metadata(scene_id, title=effective_title,
                                 details=(description or "").strip() or None)
 
-    if FILEDROP_TAG_ID:
-        result["tagged"] = await add_tag_to_scene(scene_id, FILEDROP_TAG_ID)
+    if FILEDROP_NEW_UPLOAD_TAGS:
+        result["tagged"] = await add_tags_to_scene(scene_id, FILEDROP_NEW_UPLOAD_TAGS)
 
     # Generate cover/previews/animated WebP/sprites so the scene renders properly
     # in the gallery. Fire-and-forget: we don't block the upload response on it.
     await metadata_generate([scene_id])
     return result
+
+
+def find_public_view_share(db: Session, assigned_tag_ids) -> SharedTag | None:
+    """Return a no-password tag share that makes an upload immediately viewable,
+    or None.
+
+    An upload assigned ``assigned_tag_ids`` is viewable through a public tag
+    share when that share carries one of those tags AND the limit_to_tag
+    requirement is satisfied: the share bypasses limit_to_tag (its
+    ``tag_share_respects_limit_tag`` is False), limit_to_tag is unset, or
+    limit_to_tag is itself among the assigned tags. The caller builds the view
+    URL as ``/{share.share_id}/{scene_id}``.
+    """
+    assigned = {str(t) for t in assigned_tag_ids if t not in (None, "")}
+    if not assigned:
+        return None
+    limit_ok_globally = (not LIMIT_TO_TAG) or (str(LIMIT_TO_TAG) in assigned)
+    shares = db.query(SharedTag).filter(SharedTag.password_hash == None).all()  # noqa: E711
+    for share in shares:
+        if str(share.stash_tag_id) not in assigned:
+            continue
+        respects = tag_share_respects_limit_tag(
+            share.password_hash, share.show_in_gallery, share.apply_limit_tag)
+        if not respects or limit_ok_globally:
+            return share
+    return None
+
+
+def clear_public_tag_vocabulary_cache() -> None:
+    """Drop the cached public-tag vocabulary (e.g. after retagging in Stash)."""
+    global _vocab_cache
+    with _vocab_lock:
+        _vocab_cache = None
+
+
+async def get_public_tag_vocabulary(db: Session) -> list[dict]:
+    """Return [{"id", "name"}, ...] of every tag that is already publicly
+    browsable — i.e. carried by a video in some no-password share (the tags that
+    return content at ``/gallery/tag/{name}``). TTL-cached.
+
+    These are exactly the tags an uploader is allowed to self-assign: the picker
+    offers them and the completion endpoint validates submissions against them.
+    """
+    global _vocab_cache
+    now = time.time()
+    with _vocab_lock:
+        if _vocab_cache and _vocab_cache["expires"] > now:
+            return _vocab_cache["tags"]
+
+    # No-password shares define the public surface.
+    tag_shares = db.query(SharedTag).filter(SharedTag.password_hash == None).all()  # noqa: E711
+    individual = db.query(SharedVideo).filter(SharedVideo.password_hash == None).all()  # noqa: E711
+
+    by_id: dict[str, str] = {}
+
+    # 1. Tags carried by videos in each public tag share (fetched concurrently).
+    if tag_shares:
+        results = await asyncio.gather(*(
+            get_all_videos_by_tag(
+                t.stash_tag_id,
+                respect_limit_tag=tag_share_respects_limit_tag(
+                    t.password_hash, t.show_in_gallery, t.apply_limit_tag),
+            )
+            for t in tag_shares
+        ))
+        for videos in results:
+            for v in videos:
+                for tag in v.get("tags", []):
+                    tid = str(tag.get("id"))
+                    if tid and not (LIMIT_TO_TAG and tid == str(LIMIT_TO_TAG)):
+                        by_id[tid] = tag.get("name") or tid
+
+    # 2. Tags on each individually-shared public video.
+    if individual:
+        scene_tags = await get_tags_for_scenes([v.stash_video_id for v in individual])
+        for tags in scene_tags.values():
+            for tag in tags:
+                tid = str(tag.get("id"))
+                if tid:
+                    by_id[tid] = tag.get("name") or tid
+
+    vocab = sorted(({"id": tid, "name": name} for tid, name in by_id.items()),
+                   key=lambda t: t["name"].lower())
+    with _vocab_lock:
+        _vocab_cache = {"expires": now + _VOCAB_TTL_SECONDS, "tags": vocab}  # noqa: F841
+    return vocab

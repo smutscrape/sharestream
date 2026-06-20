@@ -87,7 +87,21 @@ cache:
 filedrop:
   enabled: false
   password: ""                          # optional; empty = open page
-  tag_id:                               # optional Stash tag id applied to each upload; empty = none
+  # List of Stash tag ids applied to every upload. If one of these tags also has
+  # a PUBLIC (no-password) tag share — and the limit_to_tag requirement is met
+  # (limit_to_tag unset, the share bypasses it, or limit_to_tag is also in this
+  # list) — the upload is viewable immediately and the uploader gets a view link.
+  new_upload_tags: []
+  # tag_id:                             # deprecated single-tag form; still honored as new_upload_tags fallback
+  # When an upload is NOT auto-viewable via a public tag (above), mint a
+  # password-protected share link with a random password and show it to the
+  # uploader when processing completes. Off by default.
+  auto_share_uploads: false
+  # Let uploaders pick their own tags for an upload. The picker only offers tags
+  # that are already publicly browsable (carried by a video in any no-password
+  # share, i.e. reachable via /gallery/tag/{name}); server-side validation
+  # rejects anything outside that set. Off by default.
+  allow_user_tags: false
   ssh_host: 127.0.0.1
   ssh_user: youruser
   ssh_key: ~/.ssh/id_ed25519            # SSH private key for passwordless delivery
