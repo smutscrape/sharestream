@@ -86,6 +86,24 @@ def format_duration(seconds) -> str | None:
     return f"{s / 3600:.1f}h"
 
 
+def parse_aspect(resolution) -> float | None:
+    """Aspect ratio (w/h) from a Stash "WxH" resolution string, or None.
+
+    Used by the masonry gallery layout to size each card at its native aspect.
+    Clamped to a sane range so a bogus dimension can't produce an extreme tile.
+    """
+    if not resolution or "x" not in str(resolution):
+        return None
+    try:
+        w, h = str(resolution).lower().split("x", 1)
+        ratio = float(w) / float(h)
+    except (ValueError, ZeroDivisionError):
+        return None
+    if ratio <= 0:
+        return None
+    return max(0.4, min(ratio, 3.0))
+
+
 def _title_sort_key(title):
     """Sort key for title/name ascending that pushes untitled videos to the END.
 
@@ -403,6 +421,7 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
             "lazy_thumbnail_url": thumb_route if not eager else None,
             "hits": total_plays.get(int(video["id"]), 0),
             "duration_label": format_duration(video.get("duration")),
+            "aspect": parse_aspect(video.get("resolution")),
         })
 
     await _warm_thumbnails(warm_coros)
@@ -423,6 +442,7 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
         total_videos=total_count,
         total_videos_label=format_count(total_count),
         sort=sort,
+        gallery_mode=bool(tag_share.gallery_mode),
         # Social-embed: this share's negotiated collection thumbnail.
         collection_share_id=share_id,
         og_title=f"{tag_share.tag_name} ({format_count(total_count)} videos)",

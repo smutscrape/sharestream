@@ -50,4 +50,5 @@ def init_db() -> None:
     # serve. New shares get True from the ORM default; only pre-existing rows are
     # pinned to the old behavior here.
     _ensure_column("shared_tags", "apply_limit_tag", "BOOLEAN DEFAULT 0")
+    _ensure_column("shared_tags", "gallery_mode", "BOOLEAN DEFAULT 0")
     _seed_tag_sort_order()

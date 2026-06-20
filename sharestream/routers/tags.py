@@ -106,6 +106,7 @@ async def share_tag(request: ShareTagRequest,
             embed_mode=normalize_embed_mode(request.embed_mode),
             default_sort=normalize_sort(request.default_sort),
             apply_limit_tag=request.apply_limit_tag,
+            gallery_mode=request.gallery_mode,
             sort_order=max_order + 1
         )
         db.add(shared_tag)
@@ -155,6 +156,8 @@ async def edit_tag_share(share_id: str, request: ShareTagRequest,
             tag.default_sort = normalize_sort(request.default_sort)
         if 'apply_limit_tag' in request.model_fields_set:
             tag.apply_limit_tag = request.apply_limit_tag
+        if 'gallery_mode' in request.model_fields_set:
+            tag.gallery_mode = request.gallery_mode
         db.commit()
 
         # Drop cached per-video playlists for this tag so any resolution change

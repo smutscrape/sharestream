@@ -31,6 +31,8 @@ class ShareTagRequest(BaseModel):
     # Whether limit_to_tag applies to this share's own surfaces when it's NOT a
     # featured public share. Defaults True; only meaningful when LIMIT_TO_TAG is set.
     apply_limit_tag: bool = True
+    # Experimental masonry gallery layout (native aspect ratios) for this share.
+    gallery_mode: bool = False
     clear_password: bool = False
 
 

@@ -58,13 +58,13 @@
             </select>
         </div>
         
-        <div class="gallery" id="gallery">
+        <div class="gallery{% if gallery_mode %} gallery-masonry{% endif %}" id="gallery">
             {% for video in video_cards %}
-            <div class="video-card" data-preview-url="{{ video.preview_url }}">
+            <div class="video-card" data-preview-url="{{ video.preview_url }}"{% if gallery_mode and video.aspect %} style="--card-aspect: {{ '%.4f'|format(video.aspect) }}"{% endif %}>
                 <a href="{{ video.share_url }}">
                     <div class="thumb">
                         {% if video.lazy_thumbnail_url %}
-                        <img src="/static/default_thumbnail.jpg" 
+                        <img src="/static/default_thumbnail.jpg"
                              data-lazy-src="{{ video.lazy_thumbnail_url }}"
                              alt="{{ video.video_name }}"
                              class="lazy-load">

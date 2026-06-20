@@ -55,6 +55,10 @@ class SharedTag(Base):
     # public shares always apply it regardless. New shares default to True; existing
     # rows are back-filled to False by the migration to preserve prior behavior.
     apply_limit_tag = Column(Boolean, default=True)
+    # When True, this share's gallery lays out video cards masonry-style at each
+    # video's native aspect ratio instead of cropping to a uniform tile. Opt-in
+    # per share for now (experimental); default off preserves the cropped grid.
+    gallery_mode = Column(Boolean, default=False)
 
 
 class TagVideoHit(Base):

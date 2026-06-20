@@ -14,11 +14,12 @@ from __future__ import annotations
 import logging
 
 from fastapi import HTTPException, Request, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 
 from sharestream.backends import stash
 from sharestream.config import SHARES_DIR
 from sharestream.core.http_client import http_client, open_stash_stream, redact_url, segment_headers
+from sharestream.services.gif_thumbnails import fetch_and_cache_gif_thumb
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +157,10 @@ async def proxy_webp(stash_video_id: int, request: Request) -> StreamingResponse
 # never downgraded.
 _NO_WEBP_UAS = ("redditbot", "reddit", "embedly", "embed.ly", "twitterbot")
 
+# Clients that fetch the WebP but render it as a still (or re-encode it badly).
+# We hand these an animated GIF transcoded from the same source instead.
+_PREFERS_GIF_UAS = ("matrix-media-repo",)
+
 
 def _thumb_prefers_jpeg(request: Request) -> bool:
     ua = (request.headers.get("user-agent") or "").lower()
@@ -169,9 +174,25 @@ def _thumb_prefers_jpeg(request: Request) -> bool:
     return False
 
 
-async def proxy_thumb(stash_video_id: int, request: Request) -> StreamingResponse:
-    """Animated WebP or static JPEG thumbnail, chosen per the requesting client.
-    `private` + `Vary` keep a shared CDN from serving one format to the other."""
+def _thumb_prefers_gif(request: Request) -> bool:
+    ua = (request.headers.get("user-agent") or "").lower()
+    return any(bot in ua for bot in _PREFERS_GIF_UAS)
+
+
+async def proxy_thumb(stash_video_id: int, request: Request):
+    """Animated WebP, animated GIF, or static JPEG thumbnail, chosen per the
+    requesting client. `private` + `Vary` keep a shared CDN from serving one
+    format to the other."""
+    if _thumb_prefers_gif(request):
+        gif_path = await fetch_and_cache_gif_thumb(stash_video_id)
+        if gif_path:
+            headers = {"Cache-Control": "private, max-age=300",
+                       "Vary": "Accept, User-Agent",
+                       "Access-Control-Allow-Origin": "*"}
+            if request.method == "HEAD":
+                return Response(status_code=200, media_type="image/gif", headers=headers)
+            return FileResponse(gif_path, media_type="image/gif", headers=headers)
+        # Transcode unavailable: fall through to WebP rather than nothing.
     if _thumb_prefers_jpeg(request):
         return await proxy_stash_media(
             stash.screenshot_url(stash_video_id),

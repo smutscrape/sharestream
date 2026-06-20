@@ -38,6 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const tagShowInGalleryInput = document.getElementById('tag-show-in-gallery');
     const tagApplyLimitTagInput = document.getElementById('tag-apply-limit-tag');
     const tagApplyLimitWrapper = document.getElementById('tag-apply-limit-wrapper');
+    const tagGalleryModeInput = document.getElementById('tag-gallery-mode');
     const tagDefaultSortSelect = document.getElementById('default-sort-tag');
     const lookupTagButton = document.getElementById('lookup-tag-button');
     const tagShareMessage = document.getElementById('tag-share-message');
@@ -73,6 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const editTagShowInGalleryInput = document.getElementById('edit-tag-show-in-gallery');
     const editTagApplyLimitTagInput = document.getElementById('edit-tag-apply-limit-tag');
     const editTagApplyLimitWrapper = document.getElementById('edit-tag-apply-limit-wrapper');
+    const editTagGalleryModeInput = document.getElementById('edit-tag-gallery-mode');
     const editTagClearPasswordInput = document.getElementById('edit-tag-clear-password');
     const saveEditTagButton = document.getElementById('save-edit-tag-button');
     const cancelEditTagButton = document.getElementById('cancel-edit-tag-button');
@@ -484,6 +486,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 password: tagSharePasswordInput.value || null,
                 show_in_gallery: tagShowInGalleryInput.checked,
                 apply_limit_tag: tagApplyLimitTagInput ? tagApplyLimitTagInput.checked : true,
+                gallery_mode: tagGalleryModeInput ? tagGalleryModeInput.checked : false,
                 custom_share_id: customShareId,
                 embed_mode: (tagEmbedModeSelect && tagEmbedModeSelect.value) || null,
                 default_sort: (tagDefaultSortSelect && tagDefaultSortSelect.value) || null
@@ -643,6 +646,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         data-has-password="${tag.has_password}" 
                         data-show-in-gallery="${tag.show_in_gallery}"
                         data-apply-limit-tag="${tag.apply_limit_tag}"
+                        data-gallery-mode="${tag.gallery_mode}"
                         data-embed-mode="${escapeHTML(tag.embed_mode || '')}"
                         data-default-sort="${escapeHTML(tag.default_sort || '')}">Edit</button>
                     <button class="delete-tag-button" data-share-id="${escapeHTML(tag.share_id)}">Delete</button>
@@ -765,6 +769,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if(editTagSharePasswordInput) editTagSharePasswordInput.value = '';
                 if(editTagShowInGalleryInput) editTagShowInGalleryInput.checked = t.getAttribute('data-show-in-gallery') === 'true';
                 if(editTagApplyLimitTagInput) editTagApplyLimitTagInput.checked = t.getAttribute('data-apply-limit-tag') === 'true';
+                if(editTagGalleryModeInput) editTagGalleryModeInput.checked = t.getAttribute('data-gallery-mode') === 'true';
                 if(editTagClearPasswordInput) editTagClearPasswordInput.checked = false;
                 syncEditApplyLimitState();
 
@@ -854,6 +859,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 password: editTagSharePasswordInput.value || null,
                 show_in_gallery: editTagShowInGalleryInput.checked,
                 apply_limit_tag: editTagApplyLimitTagInput ? editTagApplyLimitTagInput.checked : true,
+                gallery_mode: editTagGalleryModeInput ? editTagGalleryModeInput.checked : false,
                 embed_mode: (editTagEmbedModeSelect && editTagEmbedModeSelect.value) || null,
                 default_sort: (editTagDefaultSortSelect && editTagDefaultSortSelect.value) || null,
                 clear_password: editTagClearPasswordInput ? editTagClearPasswordInput.checked : false

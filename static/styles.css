@@ -659,6 +659,47 @@ td a:hover {
     color: #ffffff;
 }
 
+/* --- Masonry gallery mode (experimental, opt-in per tag share) --- */
+/* A CSS multi-column layout: cards keep their full native aspect ratio (no
+   crop) and flow top-to-bottom into balanced columns. Each card carries a
+   --card-aspect var (width/height) so its thumbnail reserves the right height
+   before the image loads, avoiding reflow. */
+.gallery-masonry {
+    display: block;
+    column-width: 340px;
+    column-gap: 30px;
+    max-width: 1500px;
+    margin: 0 auto;
+    padding: 30px 0;
+}
+
+.gallery-masonry .video-card {
+    /* break-inside avoids a card being split across two columns. */
+    break-inside: avoid;
+    margin-bottom: 30px;
+    display: inline-block;
+    width: 100%;
+}
+
+.gallery-masonry .video-card .thumb {
+    /* Reserve the native aspect ratio; fall back to 16:9 if unknown. */
+    aspect-ratio: var(--card-aspect, 1.7778);
+}
+
+.gallery-masonry .video-card img {
+    width: 100%;
+    height: 100%;
+    /* Show the whole frame, not a center-crop — the point of masonry mode. */
+    object-fit: contain;
+}
+
+.gallery-masonry .video-card img.preview-webp {
+    position: absolute;
+    top: 0;
+    left: 0;
+    object-fit: contain;
+}
+
 #loading {
     text-align: center;
     padding: 20px;
