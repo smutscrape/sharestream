@@ -126,7 +126,8 @@
         
         {% include "footer.html" %}
     </div>
-    
+
+    {% if gallery_mode %}<script src="/static/gallery-masonry.js" defer></script>{% endif %}
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             // Sorting dropdown logic
