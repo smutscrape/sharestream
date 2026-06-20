@@ -22,6 +22,7 @@ from sharestream.services.collection_thumbnails import (
     build_collection_collage,
     build_collection_webp,
 )
+from sharestream.services.gif_thumbnails import build_and_cache_collection_gif
 from sharestream.services.resolver import resolve_media
 from sharestream.services.thumbnails import (
     fetch_and_cache_tag_video_thumbnail,
@@ -114,13 +115,21 @@ async def serve_collection_thumb(share_id: str, request: Request):
     videos, _ = await get_videos_by_tag(stash_tag_id, respect_limit_tag=respect_limit)
     video_ids = [int(v["id"]) for v in videos]
 
-    prefers_jpeg = media_proxy._thumb_prefers_jpeg(request)
-    if prefers_jpeg:
-        path = await build_collection_collage(share_id, video_ids)
-        media_type = "image/jpeg"
-    else:
-        path = await build_collection_webp(share_id, video_ids)
-        media_type = "image/webp"
+    # matrix-media-repo stores the WebP as a still, so hand it an animated GIF
+    # transcoded from the montage WebP. Falls through to WebP if the transcode
+    # is unavailable, rather than serving nothing.
+    path = media_type = None
+    if media_proxy._thumb_prefers_gif(request):
+        path = await build_and_cache_collection_gif(share_id, video_ids)
+        if path:
+            media_type = "image/gif"
+    if not path:
+        if media_proxy._thumb_prefers_jpeg(request):
+            path = await build_collection_collage(share_id, video_ids)
+            media_type = "image/jpeg"
+        else:
+            path = await build_collection_webp(share_id, video_ids)
+            media_type = "image/webp"
 
     if not path:
         # No usable member media (or compose failed): fall back to the site image.

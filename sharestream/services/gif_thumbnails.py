@@ -154,3 +154,42 @@ async def fetch_and_cache_gif_thumb(stash_video_id: int) -> Optional[Path]:
             return None
         ok = await asyncio.to_thread(_build_gif, resp.content, out_path)
         return out_path if ok else None
+
+
+# Build locks for collection GIFs are keyed by share id (a string), separate
+# from the per-scene int keys above.
+_collection_locks: dict[str, asyncio.Lock] = {}
+
+
+def _collection_lock_for(key: str) -> asyncio.Lock:
+    lock = _collection_locks.get(key)
+    if lock is None:
+        lock = _collection_locks[key] = asyncio.Lock()
+    return lock
+
+
+async def build_and_cache_collection_gif(share_id: str, video_ids) -> Optional[Path]:
+    """Return the private path to a cached animated GIF for a tag (collection)
+    share, transcoded from the share's montage WebP. Returns None if the WebP
+    can't be built."""
+    # Imported here to avoid a circular import (collection_thumbnails has no
+    # dependency on this module, so the edge only goes one way at call time).
+    from sharestream.services.collection_thumbnails import build_collection_webp
+
+    out_path = SHARES_DIR / f"gif-collection-{share_id}.gif"
+    if _is_fresh(out_path):
+        return out_path
+
+    async with _collection_lock_for(share_id):
+        if _is_fresh(out_path):
+            return out_path
+        webp_path = await build_collection_webp(share_id, video_ids)
+        if not webp_path:
+            return None
+        try:
+            webp_bytes = await asyncio.to_thread(webp_path.read_bytes)
+        except OSError as e:
+            logger.warning(f"GIF thumb: failed to read collection webp {webp_path}: {e}")
+            return None
+        ok = await asyncio.to_thread(_build_gif, webp_bytes, out_path)
+        return out_path if ok else None

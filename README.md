@@ -213,7 +213,7 @@ Access the admin panel at `https://yourdomain/__admin`.
 Sharestream emits Open Graph / Twitter‑player metadata tuned per platform:
 - **Lemmy / browsers**: animated WebP thumbnail
 - **Reddit / Embed.ly**: static JPEG thumbnail (they don't render WebP) — served from the *same* URL via content negotiation
-- **Matrix (`matrix-media-repo`)**: animated GIF, transcoded from the WebP (downscaled to 400px wide, frame rate halved, kept under 3 MB), since the Matrix media repo stores the WebP as a still — same URL, negotiated per request
+- **Matrix (`matrix-media-repo`)**: animated GIF, transcoded from the WebP (downscaled to 400px wide, frame rate halved, kept under 3 MB), since the Matrix media repo stores the WebP as a still — same URL, negotiated per request. Applies to both per‑video thumbnails and collection (montage) thumbnails
 - **Mastodon**: a dedicated bare `/embed/{id}` player page (no site chrome) is advertised as the `twitter:player`, so the card embeds just the video
 - **og:video**: the short preview clip or the full video, per your `embed` policy
 
@@ -286,7 +286,7 @@ Those are served live (no restart needed) — hard‑refresh and purge your CDN.
 ## Recent Updates
 
 - **Masonry gallery layout**: collections (and optionally the homepage "All Videos" grid) can arrange cards in balanced columns at each video's native aspect ratio instead of cropping to one shape. Per‑collection "Gallery mode?" toggle in the admin panel; `gallery.home_masonry` and `gallery.masonry_default` in config control the homepage grid and the new‑share toggle default
-- **Animated GIF thumbnails for Matrix**: the negotiated thumbnail endpoint now serves an animated GIF (transcoded from the WebP, 400px wide, half frame rate, under 3 MB) to `matrix-media-repo`, which otherwise renders the WebP as a still
+- **Animated GIF thumbnails for Matrix**: the negotiated thumbnail endpoints (per‑video *and* collection) now serve an animated GIF (transcoded from the WebP, 400px wide, half frame rate, under 3 MB) to `matrix-media-repo`, which otherwise renders the WebP as a still
 - **Static Markdown pages** at top‑level `/{slug}` from `data/pages/{slug}.md`, with legacy `/pages/{slug}` redirects
 - **Markdown video descriptions** on the player page (headings, lists, links, code blocks, etc.)
 - **Aggregate play counts** per video across all share contexts, used consistently on cards, galleries, and the player page
