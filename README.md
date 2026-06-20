@@ -42,6 +42,7 @@ Share groups of videos with a single link:
 - **Configurable default sort** in `config.yaml`; individual collection shares can override it in the admin panel
 - **Aggregate play counts** per video (summed across every share context) shown on cards and used for "Play Count" sorting
 - **Duration badges** on video cards (compact runtime in the bottom‑right corner)
+- **Masonry layout** (optional): instead of cropping every card to one shape, arrange cards in balanced columns at each video's *native* aspect ratio. Toggle it per collection in the admin panel, default the toggle's state site‑wide, and/or enable it for the homepage "All Videos" grid — all via `config.yaml`
 - Lazy‑loading thumbnails and hover‑to‑animate previews
 
 ## Key Features
@@ -50,7 +51,7 @@ Share groups of videos with a single link:
 |:--------|:------------|
 | **Adaptive Playback** | Video.js player with a custom skin, looping, and 30‑second skip controls |
 | **Rich Link Previews** | Open Graph / Twitter‑player tags so posts embed cleanly on social platforms |
-| **Smart Thumbnails** | Animated WebP where supported (Lemmy, browsers), static JPEG for clients that need it (Reddit/Embed.ly) — same URL, negotiated per request |
+| **Smart Thumbnails** | Animated WebP where supported (Lemmy, browsers), static JPEG for clients that need it (Reddit/Embed.ly), animated GIF for clients that mishandle WebP (Matrix's `matrix-media-repo`) — same URL, negotiated per request |
 | **Embed Policy** | Choose whether links embed the short *preview* clip or the *full* video — globally, or per‑share/per‑collection, including a *dynamic* size/length rule |
 | **Admin Dashboard** | Full create / edit / delete management for both individual and collection shares |
 | **Secure Sharing** | Optional per‑share passwords and expiring links |
@@ -127,6 +128,11 @@ embed:
   max_full_duration: 60    # seconds  (dynamic: embed full only if at/under this)
   max_full_size_mb: 50     # MB       (dynamic: ...and at/under this)
 
+# Gallery layout policy (both default false)
+gallery:
+  home_masonry: false      # homepage "All Videos" grid uses the masonry layout
+  masonry_default: false   # default state of the per‑collection "Gallery mode?" toggle for NEW shares
+
 # Caching policy
 cache:
   tag_membership_ttl_minutes: 15   # how long a tag's video-membership set is cached (default 15)
@@ -175,11 +181,11 @@ Access the admin panel at `https://yourdomain/__admin`.
 ### Sharing a collection
 1. Enter a tag name and click "Lookup" to verify it exists
 2. Choose share ID type — **Random**, **Use Tag Name**, or **Custom**
-3. Configure resolution, password, embed mode, default sort, and "Feature on Home?"
+3. Configure resolution, password, embed mode, default sort, "Feature on Home?", and "Gallery mode?" (masonry layout for this collection's page)
 4. **Reorder** collections any time by dragging their rows in the Shared Collections list
 
 ### Managing shares
-- **Full editing** of existing video *and* collection shares (name, expiry, resolution, password, gallery flag, embed mode, default sort for collections) — no need to delete and recreate
+- **Full editing** of existing video *and* collection shares (name, expiry, resolution, password, gallery flag, embed mode, default sort and masonry "Gallery mode?" for collections) — no need to delete and recreate
 - Password handling on edit: leave blank to keep the existing one, or tick "Remove password"
 - **Real‑time stats**: view counts and relative expiration times
 - **Quick actions**: copy, edit, delete; bulk refresh; **Clear Cache** (drops the cached tag→video membership sets — use it right after retagging items in Stash so a collection reflects the change without waiting out the TTL)
@@ -207,6 +213,7 @@ Access the admin panel at `https://yourdomain/__admin`.
 Sharestream emits Open Graph / Twitter‑player metadata tuned per platform:
 - **Lemmy / browsers**: animated WebP thumbnail
 - **Reddit / Embed.ly**: static JPEG thumbnail (they don't render WebP) — served from the *same* URL via content negotiation
+- **Matrix (`matrix-media-repo`)**: animated GIF, transcoded from the WebP (downscaled to 400px wide, frame rate halved, kept under 3 MB), since the Matrix media repo stores the WebP as a still — same URL, negotiated per request
 - **Mastodon**: a dedicated bare `/embed/{id}` player page (no site chrome) is advertised as the `twitter:player`, so the card embeds just the video
 - **og:video**: the short preview clip or the full video, per your `embed` policy
 
@@ -245,7 +252,7 @@ The mental model: `limit_to_tag` is your curation boundary for anything a strang
 3. **Fonts**: drop‑in `.woff2` per slot, or use the bundled web‑font defaults
 4. **Visitor notice**: optional frosted‑glass acknowledgement / age gate
 5. **Disclaimer, motto, social links**: all configurable
-6. **Gallery**: curate your public homepage per share; set the site‑wide default sort in config and override per collection in the admin panel
+6. **Gallery**: curate your public homepage per share; set the site‑wide default sort in config and override per collection in the admin panel; choose a cropped grid or a native‑aspect‑ratio masonry layout (per collection, with a site‑wide default, plus an opt‑in for the homepage grid)
 7. **Static pages**: Markdown files in `data/pages/` for terms, community info, or any other standalone content — served at `/{slug}` with the same site chrome as the rest of the site
 
 
@@ -278,6 +285,8 @@ Those are served live (no restart needed) — hard‑refresh and purge your CDN.
 
 ## Recent Updates
 
+- **Masonry gallery layout**: collections (and optionally the homepage "All Videos" grid) can arrange cards in balanced columns at each video's native aspect ratio instead of cropping to one shape. Per‑collection "Gallery mode?" toggle in the admin panel; `gallery.home_masonry` and `gallery.masonry_default` in config control the homepage grid and the new‑share toggle default
+- **Animated GIF thumbnails for Matrix**: the negotiated thumbnail endpoint now serves an animated GIF (transcoded from the WebP, 400px wide, half frame rate, under 3 MB) to `matrix-media-repo`, which otherwise renders the WebP as a still
 - **Static Markdown pages** at top‑level `/{slug}` from `data/pages/{slug}.md`, with legacy `/pages/{slug}` redirects
 - **Markdown video descriptions** on the player page (headings, lists, links, code blocks, etc.)
 - **Aggregate play counts** per video across all share contexts, used consistently on cards, galleries, and the player page
