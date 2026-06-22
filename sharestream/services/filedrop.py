@@ -193,9 +193,10 @@ def clear_public_tag_vocabulary_cache() -> None:
 
 
 async def get_public_tag_vocabulary(db: Session) -> list[dict]:
-    """Return [{"id", "name"}, ...] of every tag that is already publicly
+    """Return [{"id", "name", "count"}, ...] of every tag that is already publicly
     browsable — i.e. carried by a video in some no-password share (the tags that
-    return content at ``/gallery/tag/{name}``). TTL-cached.
+    return content at ``/gallery/tag/{name}``). ``count`` is the number of public
+    videos carrying the tag, used by the picker to rank suggestions. TTL-cached.
 
     These are exactly the tags an uploader is allowed to self-assign: the picker
     offers them and the completion endpoint validates submissions against them.
@@ -210,7 +211,12 @@ async def get_public_tag_vocabulary(db: Session) -> list[dict]:
     tag_shares = db.query(SharedTag).filter(SharedTag.password_hash == None).all()  # noqa: E711
     individual = db.query(SharedVideo).filter(SharedVideo.password_hash == None).all()  # noqa: E711
 
-    by_id: dict[str, str] = {}
+    names: dict[str, str] = {}
+    counts: dict[str, int] = {}
+
+    def _tally(tid: str, name: str | None):
+        names[tid] = name or tid
+        counts[tid] = counts.get(tid, 0) + 1
 
     # 1. Tags carried by videos in each public tag share (fetched concurrently).
     if tag_shares:
@@ -227,7 +233,7 @@ async def get_public_tag_vocabulary(db: Session) -> list[dict]:
                 for tag in v.get("tags", []):
                     tid = str(tag.get("id"))
                     if tid and not (LIMIT_TO_TAG and tid == str(LIMIT_TO_TAG)):
-                        by_id[tid] = tag.get("name") or tid
+                        _tally(tid, tag.get("name"))
 
     # 2. Tags on each individually-shared public video.
     if individual:
@@ -236,10 +242,12 @@ async def get_public_tag_vocabulary(db: Session) -> list[dict]:
             for tag in tags:
                 tid = str(tag.get("id"))
                 if tid:
-                    by_id[tid] = tag.get("name") or tid
+                    _tally(tid, tag.get("name"))
 
-    vocab = sorted(({"id": tid, "name": name} for tid, name in by_id.items()),
-                   key=lambda t: t["name"].lower())
+    vocab = sorted(
+        ({"id": tid, "name": name, "count": counts.get(tid, 0)} for tid, name in names.items()),
+        key=lambda t: t["name"].lower(),
+    )
     with _vocab_lock:
         _vocab_cache = {"expires": now + _VOCAB_TTL_SECONDS, "tags": vocab}  # noqa: F841
     return vocab
