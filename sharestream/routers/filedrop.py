@@ -10,15 +10,18 @@ off, so the routes simply don't exist for an operator who hasn't opted in.
 """
 from __future__ import annotations
 
+import asyncio
 import datetime
+import json
 import logging
 import os
 import secrets
 import tempfile
 from datetime import timezone
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from sharestream.config import (
@@ -31,7 +34,10 @@ from sharestream.config import (
     FILEDROP_MAX_UPLOAD_MB,
     FILEDROP_NEW_UPLOAD_TAGS,
     FILEDROP_PASSWORD,
+    SMUTSCRAPE_API_TOKEN,
+    SMUTSCRAPE_URL,
 )
+from sharestream.core.http_client import http_client
 from sharestream.backends.stash import add_tags_to_scene, update_scene_metadata
 from sharestream.core.branding import site_context
 from sharestream.core.security import pwd_context
@@ -56,6 +62,70 @@ router = APIRouter()
 _CHUNK = 1024 * 1024  # 1 MiB streaming chunk
 # Lifetime of an auto-minted per-upload share link (a long-lived capability URL).
 _AUTO_SHARE_DAYS = 3650
+# SSE progress-poll timeout for scrape download jobs (30 minutes).
+_SCRAPE_PROGRESS_TIMEOUT = 1800
+
+# ---------------------------------------------------------------------------
+# Pydantic models for scrape proxy routes
+# ---------------------------------------------------------------------------
+class ScrapeFetchRequest(BaseModel):
+    url: str
+
+class ScrapeStartRequest(BaseModel):
+    url: str
+    metadata_overrides: dict = {}
+    user_tags: list[str] = []
+
+class ScrapeCompleteRequest(BaseModel):
+    job_id: str
+    stash_scene_id: int
+
+# ---------------------------------------------------------------------------
+# In-memory store for metadata overrides (keyed by job_id).
+# Populated by /scrape/start, consumed and cleared by /scrape/complete.
+# ---------------------------------------------------------------------------
+_scrape_overrides: dict[str, dict] = {}
+
+# ---------------------------------------------------------------------------
+# Smutscrape helpers
+# ---------------------------------------------------------------------------
+def _smutscrape_headers() -> dict:
+    """Return auth headers for smutscrape if a token is configured."""
+    h = {}
+    if SMUTSCRAPE_API_TOKEN:
+        h["Authorization"] = f"Bearer {SMUTSCRAPE_API_TOKEN}"
+    return h
+
+STATUS_MAP: dict[str, str] = {
+    "queued": "pending",
+    "scraping": "downloading",
+    "postprocessing": "ingesting",
+    # passed through unchanged: downloading, ingesting, completed, failed
+}
+
+def _format_speed(bytes_per_sec: float | None) -> str:
+    if bytes_per_sec is None:
+        return ""
+    bps = float(bytes_per_sec)
+    if bps >= 1024 * 1024:
+        return f"{bps / (1024 * 1024):.1f} MiB/s"
+    if bps >= 1024:
+        return f"{bps / 1024:.1f} KiB/s"
+    return f"{bps:.0f} B/s"
+
+def _format_eta(seconds: int | None) -> str:
+    if seconds is None:
+        return ""
+    s = int(seconds)
+    h, rem = divmod(s, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h:02d}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
+def _map_job_status(raw: str) -> str:
+    """Map smutscrape job status to the frontend-facing status vocabulary."""
+    return STATUS_MAP.get(raw, raw)
 
 
 def _require_enabled():
@@ -245,6 +315,264 @@ async def filedrop_details(request: Request, scene_id: int = Form(...),
         if not await generate_m3u8_file(share_id, scene_id, DEFAULT_RESOLUTION):
             logger.error(f"Filedrop auto-share m3u8 generation failed for scene {scene_id}")
             # Keep the share row; playback will regenerate on demand if possible.
+        result["share_url"] = f"{BASE_DOMAIN}/{share_id}?pwd={password}"
+        result["password"] = password
+
+    return JSONResponse(result)
+
+
+# ===========================================================================
+# Scrape proxy routes — bridge to the smutscrape microservice.
+# ===========================================================================
+
+
+@router.post("/filedrop/scrape/fetch")
+async def filedrop_scrape_fetch(request: Request, body: ScrapeFetchRequest):
+    """Scrape metadata for a video URL via smutscrape (no download).
+
+    Returns structured metadata the frontend uses to pre-populate the edit form."""
+    _require_enabled()
+    if not access.filedrop_access_ok(request, FILEDROP_PASSWORD):
+        raise HTTPException(status_code=403, detail="Password required")
+    if not SMUTSCRAPE_URL:
+        raise HTTPException(status_code=503, detail="Smutscrape service not configured")
+
+    try:
+        resp = await http_client.post(
+            f"{SMUTSCRAPE_URL}/scrape",
+            json={"url": body.url, "download": False},
+            headers=_smutscrape_headers(),
+        )
+    except Exception as e:
+        logger.error(f"Smutscrape scrape/fetch unreachable: {e}")
+        raise HTTPException(status_code=502, detail="Smutscrape service unreachable")
+
+    if resp.status_code >= 400:
+        detail = "Smutscrape request failed"
+        try:
+            detail = resp.json().get("detail", detail)
+        except Exception:
+            pass
+        raise HTTPException(status_code=502, detail=detail)
+
+    data = resp.json()
+    video = data.get("video") or {}
+    return JSONResponse({
+        "url": body.url,
+        "metadata": {
+            "title": video.get("title") or "",
+            "description": video.get("description") or "",
+            "tags": video.get("tags") or [],
+            "performers": video.get("actors") or [],
+            "studios": video.get("studios") or [],
+        },
+    })
+
+
+@router.post("/filedrop/scrape/start")
+async def filedrop_scrape_start(request: Request, body: ScrapeStartRequest,
+                                 db: Session = Depends(get_db)):
+    """Start a smutscrape download+ingest job for the given URL.
+
+    The metadata_overrides are stored in-memory and applied to the Stash scene
+    after the download completes (see /filedrop/scrape/complete)."""
+    _require_enabled()
+    if not access.filedrop_access_ok(request, FILEDROP_PASSWORD):
+        raise HTTPException(status_code=403, detail="Password required")
+    if not SMUTSCRAPE_URL:
+        raise HTTPException(status_code=503, detail="Smutscrape service not configured")
+
+    # Validate uploader-chosen tags against the public vocabulary (identical to
+    # filedrop_details logic — inert when user tagging is disabled).
+    user_tag_ids: list[str] = []
+    if FILEDROP_ALLOW_USER_TAGS and body.user_tags:
+        allowed = {t["id"] for t in await get_public_tag_vocabulary(db)}
+        submitted = {str(t).strip() for t in body.user_tags if str(t).strip()}
+        invalid = submitted - allowed
+        if invalid:
+            raise HTTPException(status_code=400, detail="Unknown or non-public tag selected")
+        user_tag_ids = sorted(submitted)
+
+    # Merge user-chosen tags with the operator's configured new_upload_tags.
+    stash_tags = sorted(set(FILEDROP_NEW_UPLOAD_TAGS) | set(user_tag_ids))
+
+    try:
+        resp = await http_client.post(
+            f"{SMUTSCRAPE_URL}/scrape",
+            json={
+                "url": body.url,
+                "download": True,
+                "stash_tags": stash_tags,
+            },
+            headers=_smutscrape_headers(),
+        )
+    except Exception as e:
+        logger.error(f"Smutscrape scrape/start unreachable: {e}")
+        raise HTTPException(status_code=502, detail="Smutscrape service unreachable")
+
+    if resp.status_code >= 400:
+        detail = "Smutscrape request failed"
+        try:
+            detail = resp.json().get("detail", detail)
+        except Exception:
+            pass
+        raise HTTPException(status_code=502, detail=detail)
+
+    data = resp.json()
+    job_ids = data.get("job_ids") or []
+    if not job_ids:
+        if data.get("skipped"):
+            raise HTTPException(status_code=422, detail=data.get("skipped_reason", "Video skipped by smutscrape"))
+        raise HTTPException(status_code=502, detail="Smutscrape returned no job ID")
+
+    job_id = job_ids[0]
+    _scrape_overrides[job_id] = body.metadata_overrides or {}
+
+    return JSONResponse({"job_id": job_id, "status": "pending"})
+
+
+@router.get("/filedrop/scrape/progress")
+async def filedrop_scrape_progress(request: Request, job_id: str = Query(...)):
+    """Server-Sent Events stream for a smutscrape download job's progress.
+
+    Polls smutscrape GET /jobs/{job_id} every second, transforms the response
+    into the frontend's expected format, and yields SSE events. The stream closes
+    when the job reaches a terminal status (completed/failed) or times out."""
+    _require_enabled()
+    if not access.filedrop_access_ok(request, FILEDROP_PASSWORD):
+        raise HTTPException(status_code=403, detail="Password required")
+    if not SMUTSCRAPE_URL:
+        raise HTTPException(status_code=503, detail="Smutscrape service not configured")
+
+    async def event_stream():
+        elapsed = 0.0
+        terminal = {"completed", "failed"}
+        try:
+            while elapsed < _SCRAPE_PROGRESS_TIMEOUT:
+                try:
+                    resp = await http_client.get(
+                        f"{SMUTSCRAPE_URL}/jobs/{job_id}",
+                        headers=_smutscrape_headers(),
+                    )
+                except Exception as e:
+                    logger.error(f"Smutscrape progress poll failed: {e}")
+                    yield f"data: {json.dumps({'error': 'Smutscrape service unreachable'})}\n\n"
+                    await asyncio.sleep(2)
+                    elapsed += 2
+                    continue
+
+                if resp.status_code >= 400:
+                    detail = "Job lookup failed"
+                    try:
+                        detail = resp.json().get("detail", detail)
+                    except Exception:
+                        pass
+                    yield f"data: {json.dumps({'error': detail})}\n\n"
+                    await asyncio.sleep(2)
+                    elapsed += 2
+                    continue
+
+                job = resp.json()
+                raw_status = job.get("status", "queued")
+                mapped = _map_job_status(raw_status)
+
+                progress_pct = job.get("progress_percent")
+                if progress_pct is not None:
+                    progress_pct = round(float(progress_pct), 1)
+
+                sse_data = {
+                    "job_id": job_id,
+                    "status": mapped,
+                    "progress": {
+                        "percent": progress_pct,
+                        "speed_str": _format_speed(job.get("speed")),
+                        "eta_str": _format_eta(job.get("eta")),
+                    },
+                    "result": {
+                        "stash_scene_id": job.get("scene_id"),
+                    },
+                    "error": job.get("error"),
+                }
+                yield f"data: {json.dumps(sse_data)}\n\n"
+
+                if raw_status in terminal:
+                    return
+
+                await asyncio.sleep(1)
+                elapsed += 1
+
+            # Timeout
+            yield f"data: {json.dumps({'job_id': job_id, 'status': 'failed', 'error': 'Job timed out after 30 minutes'})}\n\n"
+        except asyncio.CancelledError:
+            # Client disconnected; clean exit.
+            pass
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/filedrop/scrape/complete")
+async def filedrop_scrape_complete(request: Request, body: ScrapeCompleteRequest,
+                                    db: Session = Depends(get_db)):
+    """Finalize a scrape download: apply metadata overrides to the Stash scene
+    and optionally mint an auto-share link (same logic as filedrop_details)."""
+    _require_enabled()
+    if not access.filedrop_access_ok(request, FILEDROP_PASSWORD):
+        raise HTTPException(status_code=403, detail="Password required")
+
+    scene_id = body.stash_scene_id
+    overrides = _scrape_overrides.pop(body.job_id, {})
+
+    # Apply metadata overrides to the Stash scene.
+    title = (overrides.get("title") or "").strip()
+    description = (overrides.get("description") or "").strip()
+    if title or description:
+        ok = await update_scene_metadata(scene_id, title=title or None,
+                                         details=description or None)
+        if not ok:
+            logger.warning(f"Scrape complete: failed to update scene metadata for {scene_id}")
+
+    # Validate + apply user-chosen tags (same pattern as filedrop_details).
+    user_tag_ids: list[str] = []
+    override_tags: list[str] = overrides.get("tags") or []
+    if FILEDROP_ALLOW_USER_TAGS and override_tags:
+        allowed = {t["id"] for t in await get_public_tag_vocabulary(db)}
+        submitted = {str(t).strip() for t in override_tags if str(t).strip()}
+        valid = sorted(submitted & allowed)
+        if valid:
+            await add_tags_to_scene(scene_id, valid)
+            user_tag_ids = valid
+
+    assigned = set(FILEDROP_NEW_UPLOAD_TAGS) | set(user_tag_ids)
+
+    result = {"scene_id": scene_id, "published": False,
+              "view_url": None, "share_url": None, "password": None}
+
+    # 1. Already publicly viewable via a no-password tag share?
+    public_share = find_public_view_share(db, assigned)
+    if public_share is not None:
+        result["published"] = True
+        result["view_url"] = f"{BASE_DOMAIN}/{public_share.share_id}/{scene_id}"
+        return JSONResponse(result)
+
+    # 2. Otherwise optionally mint a password-protected per-upload share link.
+    if FILEDROP_AUTO_SHARE:
+        password = secrets.token_urlsafe(9)
+        share_id = generate_share_id()
+        expires_at = datetime.datetime.now(timezone.utc) + datetime.timedelta(days=_AUTO_SHARE_DAYS)
+        shared = SharedVideo(
+            share_id=share_id,
+            video_name=title or f"Scene {scene_id}",
+            stash_video_id=scene_id,
+            expires_at=expires_at,
+            hits=0,
+            resolution=DEFAULT_RESOLUTION,
+            password_hash=pwd_context.hash(password),
+            show_in_gallery=False,
+        )
+        db.add(shared)
+        db.commit()
+        if not await generate_m3u8_file(share_id, scene_id, DEFAULT_RESOLUTION):
+            logger.error(f"Scrape complete: auto-share m3u8 generation failed for scene {scene_id}")
         result["share_url"] = f"{BASE_DOMAIN}/{share_id}?pwd={password}"
         result["password"] = password
 

@@ -157,6 +157,11 @@ try:
         raise ValueError
 except (TypeError, ValueError):
     FILEDROP_MAX_UPLOAD_MB = 5000
+# Smutscrape integration: URL of the smutscrape microservice and optional
+# API token for Bearer auth (leave empty when smutscrape auth is disabled).
+SMUTSCRAPE_URL = str(FILEDROP_CONFIG.get('smutscrape_url', '') or '').rstrip('/')
+SMUTSCRAPE_API_TOKEN = str(FILEDROP_CONFIG.get('smutscrape_api_token', '') or '')
+
 # Accepted upload extensions (lowercase, with dot).
 FILEDROP_ALLOWED_EXTS = {
     '.mp4', '.mkv', '.mov', '.webm', '.avi', '.m4v', '.wmv', '.flv', '.ts', '.mpg', '.mpeg', '.m2ts',

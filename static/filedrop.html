@@ -103,6 +103,75 @@
         .tag-suggestion { padding: 8px 12px; font-size: 0.88rem; cursor: pointer; color: #e8d7f0; }
         .tag-suggestion.active, .tag-suggestion:hover { background: rgba(255, 0, 128, 0.2); }
         .tag-suggestions .empty { padding: 8px 12px; font-size: 0.82rem; opacity: 0.6; }
+
+        /* Tab bar for Upload / Scrape */
+        .filedrop-tabs {
+            display: flex; gap: 0; margin-bottom: 20px;
+            border-bottom: 2px solid rgba(255,0,128,0.25);
+        }
+        .filedrop-tab {
+            padding: 10px 24px; background: none; border: none;
+            color: #c8b3d4; font-family: inherit; font-size: 1rem; font-weight: 600;
+            cursor: pointer; border-bottom: 2px solid transparent;
+            margin-bottom: -2px; transition: color 0.2s, border-color 0.2s;
+            opacity: 0.65;
+        }
+        .filedrop-tab:hover { opacity: 0.9; color: #e8d7f0; }
+        .filedrop-tab.active {
+            opacity: 1; color: #ff6ec7;
+            border-bottom-color: #ff6ec7;
+        }
+
+        /* Scrape tab UI */
+        .scrape-url-bar {
+            display: flex; gap: 10px; align-items: center;
+        }
+        .scrape-url-bar input[type="url"] {
+            flex: 1; padding: 10px 14px;
+            background: rgba(10,5,20,0.6); color: #f0e6f5;
+            border: 1px solid rgba(255,0,128,0.3); border-radius: 6px;
+            font-family: inherit; font-size: 0.95rem;
+        }
+        .scrape-url-bar input:focus { outline: none; border-color: #ff2a6d; }
+        .scrape-url-bar button { padding: 10px 20px; white-space: nowrap; }
+        .scrape-status { font-size: 0.85rem; margin-top: 8px; min-height: 20px; }
+        .scrape-status.ok { color: #4ade80; }
+        .scrape-status.error { color: #ff6b6b; }
+
+        /* Fade-in animation for phase-2 edit fields */
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(12px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .scrape-edit.fade-in {
+            animation: fadeInUp 0.4s ease-out both;
+        }
+        .scrape-edit { margin-top: 16px; }
+        .scrape-edit label {
+            display: block; font-size: 0.78rem; opacity: 0.7; margin: 10px 0 3px;
+        }
+        .scrape-edit input[type="text"],
+        .scrape-edit textarea {
+            width: 100%; box-sizing: border-box; padding: 8px 10px;
+            background: rgba(10,5,20,0.6); color: #f0e6f5;
+            border: 1px solid rgba(255,0,128,0.3); border-radius: 6px;
+            font-family: inherit; font-size: 0.9rem;
+        }
+        .scrape-edit input:focus,
+        .scrape-edit textarea:focus { outline: none; border-color: #ff2a6d; }
+        .scrape-edit textarea { resize: vertical; min-height: 56px; }
+
+        .scrape-download-area { margin-top: 16px; }
+        .scrape-download-area button { padding: 10px 20px; }
+        .scrape-download-area button[disabled] { opacity: 0.6; cursor: not-allowed; }
+        .scrape-progress { margin-top: 12px; }
+        .scrape-progress .progress-track { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
+        .scrape-progress .progress-bar {
+            height: 100%; width: 0;
+            background: linear-gradient(90deg, #ff006e, #ff6ec7);
+            transition: width 0.3s;
+        }
+        .scrape-progress-text { font-size: 0.82rem; opacity: 0.8; margin-top: 6px; }
     </style>
 </head>
 <body>
@@ -129,15 +198,61 @@
         </div>
         {% else %}
         <div class="admin-section filedrop-section">
-            <h2>Upload Files</h2>
-            <p style="color:#c8b3d4; margin-bottom:16px;">Drop video files below — uploading starts right away. Add a title, description{% if allow_user_tags %}, and tags{% endif %} while they process, then press <strong>Complete Upload</strong>.</p>
-            <div class="dropzone" id="dropzone">
-                <p><strong>Drag &amp; drop</strong> files here</p>
-                <p class="hint">or click to choose &middot; max {{ max_upload_mb }} MB each</p>
-                <p class="hint">Allowed: {{ allowed_exts | join(', ') }}</p>
+            <div class="filedrop-tabs">
+                <button class="filedrop-tab active" data-tab="upload">Upload</button>
+                <button class="filedrop-tab" data-tab="scrape">Scrape</button>
             </div>
-            <input type="file" id="file-input" multiple accept="video/*">
-            <ul class="upload-list" id="upload-list"></ul>
+
+            <!-- Upload tab -->
+            <div class="filedrop-tab-content" id="tab-upload">
+                <h2>Upload Files</h2>
+                <p style="color:#c8b3d4; margin-bottom:16px;">Drop video files below — uploading starts right away. Add a title, description{% if allow_user_tags %}, and tags{% endif %} while they process, then press <strong>Complete Upload</strong>.</p>
+                <div class="dropzone" id="dropzone">
+                    <p><strong>Drag &amp; drop</strong> files here</p>
+                    <p class="hint">or click to choose &middot; max {{ max_upload_mb }} MB each</p>
+                    <p class="hint">Allowed: {{ allowed_exts | join(', ') }}</p>
+                </div>
+                <input type="file" id="file-input" multiple accept="video/*">
+                <ul class="upload-list" id="upload-list"></ul>
+            </div>
+
+            <!-- Scrape tab -->
+            <div class="filedrop-tab-content" id="tab-scrape" style="display:none;">
+                <h2>Scrape Video</h2>
+                <p style="color:#c8b3d4; margin-bottom:16px;">Enter a video URL to scrape its metadata, edit it, then download and ingest directly into the library.</p>
+
+                <div class="scrape-url-bar">
+                    <input type="url" id="scrape-url" placeholder="https://example.com/video" required>
+                    <button type="button" id="scrape-fetch-btn">Scrape Metadata</button>
+                </div>
+                <div class="scrape-status" id="scrape-fetch-status"></div>
+
+                <div class="scrape-edit" id="scrape-edit" style="display:none;">
+                    <label>Title</label>
+                    <input type="text" id="scrape-title">
+                    <label>Description</label>
+                    <textarea id="scrape-desc" rows="3"></textarea>
+                    <label>Performers</label>
+                    <input type="text" id="scrape-performers" placeholder="Comma-separated">
+                    <label>Studios</label>
+                    <input type="text" id="scrape-studios" placeholder="Comma-separated">
+                    {% if allow_user_tags %}
+                    <label>Tags</label>
+                    <div class="tag-picker" id="scrape-tag-picker">
+                        <div class="tag-box"><input type="text" class="tag-input" placeholder="Type to search tags…" autocomplete="off"></div>
+                        <div class="tag-suggestions"></div>
+                    </div>
+                    {% endif %}
+                    <div class="scrape-download-area" id="scrape-download-area">
+                        <button type="button" id="scrape-download-btn">Download &amp; Ingest</button>
+                        <div class="scrape-progress" id="scrape-progress" style="display:none;">
+                            <div class="progress-track"><div class="progress-bar" id="scrape-progress-bar"></div></div>
+                            <div class="scrape-progress-text" id="scrape-progress-text"></div>
+                        </div>
+                    </div>
+                    <div class="result-link" id="scrape-result" style="display:none;"></div>
+                </div>
+            </div>
         </div>
         {% endif %}
 
@@ -147,6 +262,16 @@
     {% if not locked %}
     <script>
         (function () {
+            // ---- Tab switching ----
+            document.querySelectorAll('.filedrop-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll('.filedrop-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    document.querySelectorAll('.filedrop-tab-content').forEach(c => c.style.display = 'none');
+                    document.getElementById('tab-' + tab.dataset.tab).style.display = '';
+                });
+            });
+
             const dropzone = document.getElementById('dropzone');
             const fileInput = document.getElementById('file-input');
             const list = document.getElementById('upload-list');
@@ -362,116 +487,360 @@
                 }
             }
 
-            // ---- Tag picker (chips + autocomplete) ----
-            function wireTagPicker(card) {
-                const picker = card.li.querySelector('.tag-picker');
-                const box = picker.querySelector('.tag-box');
-                const input = picker.querySelector('.tag-input');
-                const suggestions = picker.querySelector('.tag-suggestions');
-                card.tagBox = box;
-                card.tagInput = input;
-                card.tagSuggestions = suggestions;
-                card.activeIdx = -1;
+            // ---- Tag picker (chips + autocomplete) — shared by Upload and Scrape tabs ----
 
-                box.addEventListener('click', () => input.focus());
-                input.addEventListener('focus', () => box.classList.add('focused'));
-                input.addEventListener('blur', () => {
-                    box.classList.remove('focused');
-                    // Delay so a click on a suggestion registers before we hide it.
-                    setTimeout(() => closeSuggestions(card), 150);
+            function initTagPicker(ctx) {
+                ctx.tagBox.addEventListener('click', () => ctx.tagInput.focus());
+                ctx.tagInput.addEventListener('focus', () => ctx.tagBox.classList.add('focused'));
+                ctx.tagInput.addEventListener('blur', () => {
+                    ctx.tagBox.classList.remove('focused');
+                    setTimeout(() => closeSuggestions(ctx), 150);
                 });
-                input.addEventListener('input', () => renderSuggestions(card));
-                input.addEventListener('keydown', e => onTagKey(card, e));
+                ctx.tagInput.addEventListener('input', () => renderSuggestions(ctx));
+                ctx.tagInput.addEventListener('keydown', e => onTagKey(ctx, e));
             }
 
-            function currentMatches(card) {
-                const q = card.tagInput.value.trim().toLowerCase();
-                const chosen = new Set(card.selectedTags.map(t => t.id));
+            function wireTagPicker(card) {
+                const picker = card.li.querySelector('.tag-picker');
+                card.tagBox = picker.querySelector('.tag-box');
+                card.tagInput = picker.querySelector('.tag-input');
+                card.tagSuggestions = picker.querySelector('.tag-suggestions');
+                card.activeIdx = -1;
+                initTagPicker(card);
+            }
+
+            function currentMatches(ctx) {
+                const q = ctx.tagInput.value.trim().toLowerCase();
+                const chosen = new Set(ctx.selectedTags.map(t => t.id));
                 let list = tagVocab.filter(t => !chosen.has(t.id));
                 if (q) list = list.filter(t => t.name.toLowerCase().includes(q));
                 return list.slice(0, 50);
             }
 
-            function renderSuggestions(card) {
-                const matches = currentMatches(card);
-                const q = card.tagInput.value.trim();
-                card.activeIdx = matches.length ? 0 : -1;
-                if (!q && !matches.length) { closeSuggestions(card); return; }
+            function renderSuggestions(ctx) {
+                const matches = currentMatches(ctx);
+                const q = ctx.tagInput.value.trim();
+                ctx.activeIdx = matches.length ? 0 : -1;
+                if (!q && !matches.length) { closeSuggestions(ctx); return; }
                 if (!matches.length) {
-                    card.tagSuggestions.innerHTML = '<div class="empty">No matching tags</div>';
+                    ctx.tagSuggestions.innerHTML = '<div class="empty">No matching tags</div>';
                 } else {
-                    card.tagSuggestions.innerHTML = matches.map((t, i) =>
-                        `<div class="tag-suggestion${i === card.activeIdx ? ' active' : ''}" data-id="${t.id}">${escapeHtml(t.name)}</div>`
+                    ctx.tagSuggestions.innerHTML = matches.map((t, i) =>
+                        `<div class="tag-suggestion${i === ctx.activeIdx ? ' active' : ''}" data-id="${t.id}">${escapeHtml(t.name)}</div>`
                     ).join('');
-                    card.tagSuggestions.querySelectorAll('.tag-suggestion').forEach(el => {
+                    ctx.tagSuggestions.querySelectorAll('.tag-suggestion').forEach(el => {
                         el.addEventListener('mousedown', e => {
                             e.preventDefault();
                             const t = matches.find(m => m.id === el.dataset.id);
-                            if (t) addTag(card, t);
+                            if (t) addTag(ctx, t);
                         });
                     });
                 }
-                card.tagSuggestions.classList.add('open');
+                ctx.tagSuggestions.classList.add('open');
             }
 
-            function closeSuggestions(card) {
-                card.tagSuggestions.classList.remove('open');
-                card.tagSuggestions.innerHTML = '';
-                card.activeIdx = -1;
+            function closeSuggestions(ctx) {
+                ctx.tagSuggestions.classList.remove('open');
+                ctx.tagSuggestions.innerHTML = '';
+                ctx.activeIdx = -1;
             }
 
-            function onTagKey(card, e) {
-                const matches = currentMatches(card);
+            function onTagKey(ctx, e) {
+                const matches = currentMatches(ctx);
                 if (e.key === 'ArrowDown') {
                     e.preventDefault();
-                    if (matches.length) { card.activeIdx = (card.activeIdx + 1) % matches.length; highlight(card, matches); }
+                    if (matches.length) { ctx.activeIdx = (ctx.activeIdx + 1) % matches.length; highlight(ctx, matches); }
                 } else if (e.key === 'ArrowUp') {
                     e.preventDefault();
-                    if (matches.length) { card.activeIdx = (card.activeIdx - 1 + matches.length) % matches.length; highlight(card, matches); }
+                    if (matches.length) { ctx.activeIdx = (ctx.activeIdx - 1 + matches.length) % matches.length; highlight(ctx, matches); }
                 } else if (e.key === 'Enter' || e.key === 'Tab') {
-                    if (card.activeIdx >= 0 && matches[card.activeIdx]) {
+                    if (ctx.activeIdx >= 0 && matches[ctx.activeIdx]) {
                         e.preventDefault();
-                        addTag(card, matches[card.activeIdx]);
+                        addTag(ctx, matches[ctx.activeIdx]);
                     }
                     // No highlighted match: let Tab move focus / Enter do nothing.
-                } else if (e.key === 'Backspace' && !card.tagInput.value && card.selectedTags.length) {
-                    removeTag(card, card.selectedTags[card.selectedTags.length - 1].id);
+                } else if (e.key === 'Backspace' && !ctx.tagInput.value && ctx.selectedTags.length) {
+                    removeTag(ctx, ctx.selectedTags[ctx.selectedTags.length - 1].id);
                 } else if (e.key === 'Escape') {
-                    closeSuggestions(card);
+                    closeSuggestions(ctx);
                 }
             }
 
-            function highlight(card, matches) {
-                const els = card.tagSuggestions.querySelectorAll('.tag-suggestion');
-                els.forEach((el, i) => el.classList.toggle('active', i === card.activeIdx));
-                const active = els[card.activeIdx];
+            function highlight(ctx, matches) {
+                const els = ctx.tagSuggestions.querySelectorAll('.tag-suggestion');
+                els.forEach((el, i) => el.classList.toggle('active', i === ctx.activeIdx));
+                const active = els[ctx.activeIdx];
                 if (active) active.scrollIntoView({ block: 'nearest' });
             }
 
-            function addTag(card, tag) {
-                if (card.selectedTags.some(t => t.id === tag.id)) return;
-                card.selectedTags.push(tag);
+            function addTag(ctx, tag) {
+                if (ctx.selectedTags.some(t => t.id === tag.id)) return;
+                ctx.selectedTags.push(tag);
                 const chip = document.createElement('span');
                 chip.className = 'tag-chip';
                 chip.dataset.id = tag.id;
                 chip.innerHTML = `${escapeHtml(tag.name)}<button type="button" class="x" aria-label="Remove">×</button>`;
-                chip.querySelector('.x').addEventListener('click', () => removeTag(card, tag.id));
-                card.tagBox.insertBefore(chip, card.tagInput);
-                card.tagInput.value = '';
-                renderSuggestions(card);
-                card.tagInput.focus();
+                chip.querySelector('.x').addEventListener('click', () => removeTag(ctx, tag.id));
+                ctx.tagBox.insertBefore(chip, ctx.tagInput);
+                ctx.tagInput.value = '';
+                renderSuggestions(ctx);
+                ctx.tagInput.focus();
             }
 
-            function removeTag(card, id) {
-                card.selectedTags = card.selectedTags.filter(t => t.id !== id);
-                const chip = card.tagBox.querySelector(`.tag-chip[data-id="${CSS.escape(id)}"]`);
+            function removeTag(ctx, id) {
+                ctx.selectedTags = ctx.selectedTags.filter(t => t.id !== id);
+                const chip = ctx.tagBox.querySelector(`.tag-chip[data-id="${CSS.escape(id)}"]`);
                 if (chip) chip.remove();
-                card.tagInput.focus();
+                ctx.tagInput.focus();
             }
 
             function escapeHtml(s) {
                 return String(s).replace(/[&<>"']/g, c =>
                     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+            }
+
+            // ---- Scrape workflow ----
+            const scrapeUrlInput = document.getElementById('scrape-url');
+            const scrapeFetchBtn = document.getElementById('scrape-fetch-btn');
+            const scrapeFetchStatus = document.getElementById('scrape-fetch-status');
+            const scrapeEdit = document.getElementById('scrape-edit');
+            const scrapeDownloadBtn = document.getElementById('scrape-download-btn');
+            const scrapeProgress = document.getElementById('scrape-progress');
+            const scrapeProgressBar = document.getElementById('scrape-progress-bar');
+            const scrapeProgressText = document.getElementById('scrape-progress-text');
+            const scrapeResult = document.getElementById('scrape-result');
+
+            const scrapeTags = [];  // selected tags: [{id, name}]
+            let scrapedMeta = {};   // raw metadata from smutscrape
+            let currentJobId = null;
+
+            // Wire up the scrape tag picker (if user tagging is enabled).
+            if (ALLOW_USER_TAGS) {
+                const scrapeTagCtx = {
+                    tagBox: document.querySelector('#scrape-tag-picker .tag-box'),
+                    tagInput: document.querySelector('#scrape-tag-picker .tag-input'),
+                    tagSuggestions: document.querySelector('#scrape-tag-picker .tag-suggestions'),
+                    selectedTags: scrapeTags,
+                    activeIdx: -1,
+                };
+                initTagPicker(scrapeTagCtx);
+            }
+
+            // Phase 1: Fetch metadata from smutscrape.
+            scrapeFetchBtn.addEventListener('click', async () => {
+                const url = scrapeUrlInput.value.trim();
+                if (!url) return;
+                scrapeFetchBtn.disabled = true;
+                scrapeFetchStatus.textContent = 'Fetching metadata…';
+                scrapeFetchStatus.className = 'scrape-status';
+                scrapeEdit.style.display = 'none';
+                scrapeEdit.classList.remove('fade-in');
+                scrapeResult.style.display = 'none';
+                try {
+                    const r = await fetch('/filedrop/scrape/fetch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url }),
+                        credentials: 'same-origin',
+                    });
+                    const data = await r.json();
+                    if (!r.ok) throw new Error(data.detail || 'Scrape failed');
+                    scrapedMeta = data.metadata;
+                    populateScrapeForm(scrapedMeta);
+                    scrapeEdit.style.display = '';
+                    // Force reflow so the fade-in animation plays.
+                    void scrapeEdit.offsetWidth;
+                    scrapeEdit.classList.add('fade-in');
+                    scrapeFetchStatus.textContent = 'Metadata fetched. Edit below, then download.';
+                    scrapeFetchStatus.className = 'scrape-status ok';
+                } catch (e) {
+                    scrapeFetchStatus.textContent = e.message;
+                    scrapeFetchStatus.className = 'scrape-status error';
+                } finally {
+                    scrapeFetchBtn.disabled = false;
+                }
+            });
+
+            function populateScrapeForm(meta) {
+                document.getElementById('scrape-title').value = meta.title || '';
+                document.getElementById('scrape-desc').value = meta.description || '';
+                document.getElementById('scrape-performers').value = (meta.performers || []).join(', ');
+                document.getElementById('scrape-studios').value = (meta.studios || []).join(', ');
+
+                // Reset tags: clear chips and selectedTags
+                scrapeTags.length = 0;
+                const tagBox = document.querySelector('#scrape-tag-picker .tag-box');
+                if (tagBox) {
+                    tagBox.querySelectorAll('.tag-chip').forEach(c => c.remove());
+                }
+
+                // Pre-populate tags: match scraped tag names against tagVocab.
+                if (ALLOW_USER_TAGS && meta.tags && meta.tags.length) {
+                    const scrapedNames = new Set(meta.tags.map(t => t.toLowerCase().trim()));
+                    for (const tag of tagVocab) {
+                        if (scrapedNames.has(tag.name.toLowerCase()) && !scrapeTags.find(t => t.id === tag.id)) {
+                            const ctx = getScrapeTagCtx();
+                            addTag(ctx, tag);
+                        }
+                    }
+                }
+
+                // Reset download area for a fresh start.
+                currentJobId = null;
+                scrapeProgress.style.display = 'none';
+                scrapeProgressBar.style.width = '0%';
+                scrapeResult.style.display = 'none';
+                scrapeResult.innerHTML = '';
+                scrapeDownloadBtn.disabled = false;
+                scrapeDownloadBtn.textContent = 'Download & Ingest';
+            }
+
+            function getScrapeTagCtx() {
+                return {
+                    tagBox: document.querySelector('#scrape-tag-picker .tag-box'),
+                    tagInput: document.querySelector('#scrape-tag-picker .tag-input'),
+                    tagSuggestions: document.querySelector('#scrape-tag-picker .tag-suggestions'),
+                    selectedTags: scrapeTags,
+                    activeIdx: -1,
+                };
+            }
+
+            function getEditedMeta() {
+                const title = document.getElementById('scrape-title').value.trim();
+                const description = document.getElementById('scrape-desc').value.trim();
+                const performers = document.getElementById('scrape-performers').value
+                    .split(',').map(s => s.trim()).filter(Boolean);
+                const studios = document.getElementById('scrape-studios').value
+                    .split(',').map(s => s.trim()).filter(Boolean);
+                return {
+                    title, description,
+                    performers, studios,
+                    tags: scrapeTags.map(t => t.id),
+                };
+            }
+
+            // Phase 3: Start the download job and watch progress via SSE.
+            scrapeDownloadBtn.addEventListener('click', async () => {
+                if (scrapeDownloadBtn.disabled) return;
+                scrapeDownloadBtn.disabled = true;
+                scrapeDownloadBtn.textContent = 'Starting…';
+                scrapeResult.style.display = 'none';
+
+                const edited = getEditedMeta();
+                try {
+                    const r = await fetch('/filedrop/scrape/start', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            url: scrapeUrlInput.value.trim(),
+                            metadata_overrides: edited,
+                            user_tags: edited.tags,
+                        }),
+                        credentials: 'same-origin',
+                    });
+                    const data = await r.json();
+                    if (!r.ok) throw new Error(data.detail || 'Failed to start download');
+                    currentJobId = data.job_id;
+                    watchProgress(currentJobId);
+                } catch (e) {
+                    scrapeFetchStatus.textContent = e.message;
+                    scrapeFetchStatus.className = 'scrape-status error';
+                    scrapeDownloadBtn.disabled = false;
+                    scrapeDownloadBtn.textContent = 'Download & Ingest';
+                }
+            });
+
+            function watchProgress(jobId) {
+                scrapeProgress.style.display = '';
+                scrapeProgressBar.style.width = '0%';
+                scrapeProgressText.textContent = 'Starting download…';
+                scrapeDownloadBtn.textContent = 'Downloading…';
+
+                const evtSource = new EventSource('/filedrop/scrape/progress?job_id=' + encodeURIComponent(jobId));
+                evtSource.onmessage = function (e) {
+                    try {
+                        const d = JSON.parse(e.data);
+                        if (d.error) {
+                            scrapeFetchStatus.textContent = d.error;
+                            scrapeFetchStatus.className = 'scrape-status error';
+                            evtSource.close();
+                            scrapeDownloadBtn.disabled = false;
+                            scrapeDownloadBtn.textContent = 'Retry Download';
+                            return;
+                        }
+                        // Update progress bar.
+                        if (d.progress && d.progress.percent != null) {
+                            scrapeProgressBar.style.width = d.progress.percent + '%';
+                        }
+                        const speed = d.progress && d.progress.speed_str ? ' at ' + d.progress.speed_str : '';
+                        const eta = d.progress && d.progress.eta_str ? ' — ' + d.progress.eta_str + ' remaining' : '';
+                        scrapeProgressText.textContent = d.status + speed + eta;
+
+                        if (d.status === 'done') {
+                            evtSource.close();
+                            scrapeProgressText.textContent = 'Download complete';
+                            scrapeFetchStatus.textContent = 'Ingested into Stash. Finalizing…';
+                            scrapeFetchStatus.className = 'scrape-status ok';
+                            finalizeScrape(jobId, d.result && d.result.stash_scene_id);
+                        } else if (d.status === 'failed') {
+                            evtSource.close();
+                            scrapeFetchStatus.textContent = d.error || 'Download failed';
+                            scrapeFetchStatus.className = 'scrape-status error';
+                            scrapeDownloadBtn.disabled = false;
+                            scrapeDownloadBtn.textContent = 'Retry Download';
+                        }
+                    } catch (ex) { /* ignore parse errors */ }
+                };
+                evtSource.onerror = function () {
+                    evtSource.close();
+                    if (scrapeProgressBar.style.width !== '100%') {
+                        scrapeFetchStatus.textContent = 'Lost connection to progress stream';
+                        scrapeFetchStatus.className = 'scrape-status error';
+                        scrapeDownloadBtn.disabled = false;
+                        scrapeDownloadBtn.textContent = 'Retry Download';
+                    }
+                };
+            }
+
+            async function finalizeScrape(jobId, stashSceneId) {
+                if (!stashSceneId) {
+                    scrapeFetchStatus.textContent = 'Download completed but no Stash scene ID returned';
+                    scrapeFetchStatus.className = 'scrape-status error';
+                    scrapeDownloadBtn.disabled = false;
+                    scrapeDownloadBtn.textContent = 'Download & Ingest';
+                    return;
+                }
+                try {
+                    const r = await fetch('/filedrop/scrape/complete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ job_id: jobId, stash_scene_id: stashSceneId }),
+                        credentials: 'same-origin',
+                    });
+                    const data = await r.json();
+                    if (!r.ok) throw new Error(data.detail || 'Finalize failed');
+                    showScrapeResult(data);
+                    scrapeDownloadBtn.textContent = '✓ Complete';
+                    scrapeDownloadBtn.classList.add('completed');
+                    scrapeFetchStatus.textContent = '';
+                } catch (e) {
+                    scrapeFetchStatus.textContent = e.message;
+                    scrapeFetchStatus.className = 'scrape-status error';
+                    scrapeDownloadBtn.disabled = false;
+                    scrapeDownloadBtn.textContent = 'Retry';
+                }
+            }
+
+            function showScrapeResult(data) {
+                scrapeResult.style.display = 'block';
+                if (data.published && data.view_url) {
+                    scrapeResult.innerHTML =
+                        '<a href="' + data.view_url + '" target="_blank" rel="noopener">View your video →</a>';
+                } else if (data.share_url) {
+                    const pwd = data.password ? '<span class="pwd-note">Password: ' + data.password + '</span>' : '';
+                    scrapeResult.innerHTML =
+                        '<a href="' + data.share_url + '" target="_blank" rel="noopener">Your private link →</a>' + pwd;
+                }
             }
         })();
     </script>
