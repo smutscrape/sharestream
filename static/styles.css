@@ -1495,9 +1495,9 @@ td a:hover {
 }
 
 .stat-value {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: #fff;
+    font-size: 1rem;
+    font-weight: 400;
+    color: #ff00b6;
     margin-bottom: 4px;
 }
 
