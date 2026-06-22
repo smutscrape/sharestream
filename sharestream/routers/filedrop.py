@@ -100,7 +100,8 @@ STATUS_MAP: dict[str, str] = {
     "queued": "pending",
     "scraping": "downloading",
     "postprocessing": "ingesting",
-    # passed through unchanged: downloading, ingesting, completed, failed
+    "completed": "done",
+    # passed through unchanged: downloading, ingesting, failed
 }
 
 def _format_speed(bytes_per_sec: float | None) -> str:
