@@ -366,6 +366,7 @@ async def filedrop_scrape_fetch(request: Request, body: ScrapeFetchRequest):
             "tags": video.get("tags") or [],
             "performers": video.get("actors") or [],
             "studios": video.get("studios") or [],
+            "image": video.get("image") or "",
         },
     })
 

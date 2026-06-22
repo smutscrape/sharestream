@@ -45,6 +45,20 @@
             margin-bottom: 10px;
         }
         .upload-item .name { font-weight: 600; word-break: break-all; font-size: 0.85rem; opacity: 0.8; }
+        /* Preview thumbnail shown ASAP — for uploads it's grabbed from the local
+           video file before/while it uploads; for scrapes it's the source image. */
+        .preview-thumb {
+            display: none; width: 100%; max-height: 220px; object-fit: contain;
+            border-radius: 8px; margin: 10px 0 4px;
+            background: rgba(0,0,0,0.35); border: 1px solid rgba(255,0,128,0.2);
+        }
+        .preview-thumb.ready { display: block; }
+        .scrape-preview-thumb {
+            display: none; width: 100%; max-height: 260px; object-fit: contain;
+            border-radius: 8px; margin: 4px 0 4px;
+            background: rgba(0,0,0,0.35); border: 1px solid rgba(255,0,128,0.2);
+        }
+        .scrape-preview-thumb.ready { display: block; }
         .upload-item .status { font-size: 0.85rem; opacity: 0.85; margin-top: 8px; }
         .upload-item .status.done { color: #4ade80; }
         .upload-item .status.error { color: #ff6b6b; }
@@ -231,6 +245,7 @@
                 <div class="scrape-status" id="scrape-fetch-status"></div>
 
                 <div class="scrape-edit" id="scrape-edit" style="display:none;">
+                    <img class="scrape-preview-thumb" id="scrape-preview-thumb" alt="">
                     <label>Title</label>
                     <input type="text" id="scrape-title">
                     <label>Description</label>
@@ -330,6 +345,7 @@
                 li.className = 'upload-item';
                 li.innerHTML = `
                     <div class="name"></div>
+                    <img class="preview-thumb" alt="">
                     <div class="progress-track"><div class="progress-bar"></div></div>
                     <div class="status">Queued…</div>
                     <div class="details">
@@ -354,6 +370,7 @@
                 const card = {
                     li,
                     bar: li.querySelector('.progress-bar'),
+                    thumb: li.querySelector('.preview-thumb'),
                     status: li.querySelector('.status'),
                     details: li.querySelector('.details'),
                     title: li.querySelector('.title-input'),
@@ -377,6 +394,11 @@
                 } else if (file.size > MAX_MB * 1024 * 1024) {
                     fail(card, `Rejected: exceeds ${MAX_MB} MB`); card.rejected = true;
                     card.details.style.display = 'none';
+                } else {
+                    // Grab a poster frame from the local file right away — no need
+                    // to wait for the upload. Best-effort: silently skips formats
+                    // the browser can't decode (e.g. some .mkv/.avi).
+                    generateLocalThumbnail(file, card.thumb);
                 }
                 return card;
             }
@@ -384,6 +406,51 @@
             function fail(card, msg) {
                 card.status.textContent = msg;
                 card.status.className = 'status error';
+            }
+
+            // Decode a frame from the local video file and paint it into `img`,
+            // without waiting for (or interfering with) the upload. Uses an
+            // object URL + an offscreen <video>; draws to a canvas so the result
+            // is a static image the upload progress can't disturb. All failure
+            // paths are silent — the preview is a nicety, not a requirement.
+            function generateLocalThumbnail(file, img) {
+                let url;
+                try { url = URL.createObjectURL(file); } catch (e) { return; }
+                const video = document.createElement('video');
+                video.preload = 'metadata';
+                video.muted = true;
+                video.playsInline = true;
+                let done = false;
+                const cleanup = () => {
+                    if (done) return;
+                    done = true;
+                    try { URL.revokeObjectURL(url); } catch (e) {}
+                    video.removeAttribute('src');
+                    try { video.load(); } catch (e) {}
+                };
+                const capture = () => {
+                    try {
+                        const w = video.videoWidth, h = video.videoHeight;
+                        if (!w || !h) { cleanup(); return; }
+                        const canvas = document.createElement('canvas');
+                        canvas.width = w; canvas.height = h;
+                        canvas.getContext('2d').drawImage(video, 0, 0, w, h);
+                        img.src = canvas.toDataURL('image/jpeg', 0.8);
+                        img.classList.add('ready');
+                    } catch (e) { /* tainted/undecodable — skip */ }
+                    cleanup();
+                };
+                video.addEventListener('error', cleanup);
+                // Seek a little into the file to avoid an all-black opening frame.
+                video.addEventListener('loadeddata', () => {
+                    try {
+                        const t = Math.min(1, (video.duration || 2) * 0.1);
+                        if (video.currentTime < t) { video.currentTime = t; }
+                        else { capture(); }
+                    } catch (e) { capture(); }
+                });
+                video.addEventListener('seeked', capture);
+                video.src = url;
             }
 
             function uploadOne(file, card) {
@@ -681,6 +748,17 @@
                 document.getElementById('scrape-desc').value = meta.description || '';
                 document.getElementById('scrape-performers').value = (meta.performers || []).join(', ');
                 document.getElementById('scrape-studios').value = (meta.studios || []).join(', ');
+
+                // Source preview image (from smutscrape), shown immediately.
+                const previewThumb = document.getElementById('scrape-preview-thumb');
+                if (meta.image) {
+                    previewThumb.onload = () => previewThumb.classList.add('ready');
+                    previewThumb.onerror = () => previewThumb.classList.remove('ready');
+                    previewThumb.src = meta.image;
+                } else {
+                    previewThumb.classList.remove('ready');
+                    previewThumb.removeAttribute('src');
+                }
 
                 // Reset tags: clear chips and selectedTags
                 scrapeTags.length = 0;
