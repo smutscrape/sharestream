@@ -31,6 +31,7 @@ from sharestream.config import (
     FILEDROP_ALLOWED_EXTS,
     FILEDROP_AUTO_SHARE,
     FILEDROP_ENABLED,
+    FILEDROP_LOCAL,
     FILEDROP_MAX_UPLOAD_MB,
     FILEDROP_NEW_UPLOAD_TAGS,
     FILEDROP_PASSWORD,
@@ -48,6 +49,7 @@ from sharestream.services import access
 from sharestream.services.filedrop import (
     find_public_view_share,
     get_public_tag_vocabulary,
+    local_put,
     sanitize_filename,
     sftp_put,
     trigger_scan_and_tag,
@@ -206,7 +208,10 @@ async def filedrop_upload(request: Request, file: UploadFile,
         if written == 0:
             raise HTTPException(status_code=400, detail="Empty file")
 
-        await sftp_put(tmp_path, remote_name)
+        if FILEDROP_LOCAL:
+            await local_put(tmp_path, remote_name)
+        else:
+            await sftp_put(tmp_path, remote_name)
     except HTTPException:
         raise
     except Exception as e:

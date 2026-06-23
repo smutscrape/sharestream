@@ -18,6 +18,7 @@ import asyncio
 import logging
 import os
 import posixpath
+import shutil
 import re
 import secrets
 import time
@@ -113,6 +114,19 @@ async def sftp_put(local_path: str, remote_name: str) -> str:
             await sftp.put(local_path, remote_path)
     logger.info(f"Filedrop SFTP delivered {remote_name} to {FILEDROP_SSH_HOST}:{remote_path}")
     return remote_path
+
+
+async def local_put(local_path: str, remote_name: str) -> str:
+    """Copy ``local_path`` to ``FILEDROP_HOST_DIR/remote_name`` on the local filesystem.
+
+    Returns the destination path. Raises on failure.
+    """
+    dest_dir = FILEDROP_HOST_DIR
+    os.makedirs(dest_dir, exist_ok=True)
+    dest_path = os.path.join(dest_dir, remote_name)
+    shutil.copy2(local_path, dest_path)
+    logger.info("Filedrop local copy delivered %s to %s", remote_name, dest_path)
+    return dest_path
 
 
 async def trigger_scan_and_tag(remote_name: str, original_name: str,

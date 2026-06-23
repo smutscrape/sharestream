@@ -88,13 +88,18 @@ cache:
   collection_thumbnail_ttl_minutes: 360
 
 # Optional public "filedrop" upload page (served at /filedrop). Visitors can
-# upload video files that are ingested into your Stash. Stash has no upload API,
-# so files are sent over SSH/SFTP into a folder Stash scans, then scanned and
-# (optionally) tagged. DISABLED unless `enabled: true`.
+# upload video files that are ingested into your Stash. DISABLED unless
+# ``enabled: true``.
 #
-# host_dir is the path ON THE SSH HOST where bytes are written; stash_scan_path
-# is THAT SAME FOLDER as Stash sees it. They differ when Stash runs in a
-# container with a bind mount (e.g. host /mnt/Media -> container /data, so a host
+# Two delivery modes:
+#   local: false  (default) — SSH/SFTP the file to the host running Stash.
+#   local: true             — copy the file directly on the local filesystem
+#                             (use when sharestream and Stash run on the same
+#                             machine). SSH settings are ignored in this mode.
+#
+# host_dir is the path where bytes are written; stash_scan_path is THAT SAME
+# FOLDER as Stash sees it. They differ when Stash runs in a container with a
+# bind mount (e.g. host /mnt/Media -> container /data, so a host path of
 # /mnt/Media/XXX/_filedrop is /data/XXX/_filedrop inside Stash). When Stash runs
 # natively, set both to the same path.
 filedrop:
@@ -115,6 +120,10 @@ filedrop:
   # share, i.e. reachable via /gallery/tag/{name}); server-side validation
   # rejects anything outside that set. Off by default.
   allow_user_tags: false
+  # Set to true to copy files locally instead of using SSH/SFTP.
+  # When local is true, the ssh_* settings below are ignored.
+  local: false
+  # SSH/SFTP delivery (only used when local: false).
   ssh_host: 127.0.0.1
   ssh_user: youruser
   ssh_key: ~/.ssh/id_ed25519            # SSH private key for passwordless delivery

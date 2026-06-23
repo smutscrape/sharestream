@@ -141,7 +141,10 @@ FILEDROP_AUTO_SHARE = bool(FILEDROP_CONFIG.get('auto_share_uploads', False))
 # When true, the upload UI shows a tag picker and the server accepts the
 # uploader's own tag choices (restricted to the public-tag vocabulary).
 FILEDROP_ALLOW_USER_TAGS = bool(FILEDROP_CONFIG.get('allow_user_tags', False))
-# SSH/SFTP delivery to the box hosting Stash's library.
+# When true, files are copied locally instead of being SFTP'd over SSH.
+# SSH settings below are ignored in local mode.
+FILEDROP_LOCAL = bool(FILEDROP_CONFIG.get('local', False))
+# SSH/SFTP delivery to the box hosting Stash's library (unused when local: true).
 FILEDROP_SSH_HOST = str(FILEDROP_CONFIG.get('ssh_host', '') or '')
 FILEDROP_SSH_USER = str(FILEDROP_CONFIG.get('ssh_user', '') or '')
 FILEDROP_SSH_KEY = os.path.expanduser(str(FILEDROP_CONFIG.get('ssh_key', '~/.ssh/id_ed25519')))
