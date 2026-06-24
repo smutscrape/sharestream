@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 # How many video cards a single gallery view (home page, tag gallery page)
 # shows. The tag gallery paginates at this size; the home page shows this many
 # as a teaser of the full library (the real total is shown in the header).
-GALLERY_PAGE_SIZE = 24
+GALLERY_PAGE_SIZE = 36
 
 
 def format_count(n: int) -> str:

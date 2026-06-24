@@ -16,3 +16,5 @@ __pycaches/
 .vscode/*
 testbench/
 .claude
+my_captions.md
+export_captions.py
