@@ -31,8 +31,35 @@ except Exception as e:  # pragma: no cover - fatal at startup
     logger.error(f"Failed to load config.yaml: {e}")
     raise
 
-# Make sure LIMIT_TO_TAG is defined globally after config is loaded
+# Make sure LIMIT_TO_TAG is defined globally after config is loaded.
+# NOTE: As of Phase 2, limit_to_tag is RETIRED as an access-control mechanism —
+# scene visibility is governed by visibility_tags below. limit_to_tag now only
+# scopes curated Gallery (SharedTag) surfaces; a deprecation warning is logged at
+# startup when it is set.
 LIMIT_TO_TAG = config['stash'].get('limit_to_tag', None)
+
+
+def _tag_id_or_none(value):
+    """Normalize a configured tag id to a non-empty str, or None. Tag ids are
+    compared as strings everywhere (Stash returns string ids), so we coerce here."""
+    if value in (None, ""):
+        return None
+    return str(value)
+
+
+# Config-driven scene visibility (Phase 2). Each maps a visibility level to a
+# Stash tag id; a scene's level is determined by which of these tags it carries.
+#   public  -> shown on home + search + reachable by direct /v/ link
+#   listed  -> search + direct link, not home
+#   hidden  -> 404 everywhere (overrides all)
+#   (a scene carrying none of these is "unlisted": reachable only by its
+#    unguessable /v/ slug, which is itself the capability to view it)
+# Unset levels disable that tier gracefully (e.g. no hidden tag => nothing is
+# force-hidden), so the app keeps working before the operator configures them.
+VISIBILITY_CONFIG = config['stash'].get('visibility_tags', {}) or {}
+VISIBILITY_PUBLIC = _tag_id_or_none(VISIBILITY_CONFIG.get('public'))
+VISIBILITY_LISTED = _tag_id_or_none(VISIBILITY_CONFIG.get('listed'))
+VISIBILITY_HIDDEN = _tag_id_or_none(VISIBILITY_CONFIG.get('hidden'))
 
 SHARESTREAM_HOST = config['sharestream']['host']
 SHARESTREAM_PORT = config['sharestream']['port']
@@ -238,6 +265,24 @@ if not SECRET_KEY:
                        f"sharestream.secret_key in config to fix.")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+# ------------------------------------------------------------------
+# Video slugs (canonical /v/{slug} routing via Sqids).
+# ------------------------------------------------------------------
+# Stash scene ids are Sqids-encoded so the canonical video URL never exposes a
+# sequential id and adjacent guesses decode to nothing. A custom slug_alphabet
+# (a shuffled permutation of the 62 a-zA-Z0-9 chars) randomizes the output so
+# ids aren't guessable in order; it MUST stay stable across restarts/workers (a
+# changed alphabet invalidates every existing /v/ link). When unset we fall back
+# to the default Sqids alphabet — slugs.py logs a warning since URLs then aren't
+# randomized. slug_min_length pads short ids so a low scene id isn't 1-2 chars.
+SLUG_ALPHABET = (config['sharestream'].get('slug_alphabet') or '').strip()
+try:
+    SLUG_MIN_LENGTH = int(config['sharestream'].get('slug_min_length', 6) or 6)
+    if SLUG_MIN_LENGTH < 0:
+        raise ValueError
+except (TypeError, ValueError):
+    SLUG_MIN_LENGTH = 6
 
 # SQLite database setup
 DATABASE_URL = "sqlite:///shared_videos.db"

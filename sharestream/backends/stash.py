@@ -26,6 +26,24 @@ def _graphql_headers() -> dict:
     return {"ApiKey": STASH_API_KEY, "Content-Type": "application/json"}
 
 
+def _is_internal_tag(name: str | None) -> bool:
+    """Internal/tooling tags are named with a leading underscore (e.g. the
+    visibility tags _public/_listed/_banned). They must never be shown in the
+    player metadata, be browsable at /tag/{name}, or appear as a search facet.
+    Treat a missing name as internal too (don't surface nameless tags)."""
+    return not name or name.startswith("_")
+
+
+def _visible_scene_tags(tags: list[dict]) -> list[dict]:
+    """Filter a scene's raw Stash tags down to user-facing ones: drop the global
+    LIMIT_TO_TAG gate tag and any internal underscore-prefixed tag."""
+    return [
+        t for t in (tags or [])
+        if not (LIMIT_TO_TAG and str(t.get("id")) == str(LIMIT_TO_TAG))
+        and not _is_internal_tag(t.get("name"))
+    ]
+
+
 # ------------------------------------------------------------------
 # Stash media URL builders
 # ------------------------------------------------------------------
@@ -310,8 +328,8 @@ async def get_videos_by_tag(tag_id: str, page: int = 1, per_page: int = 1000, so
                 "duration": (scene.get("files") or [{}])[0].get("duration"),
                 "screenshot": scene["paths"]["screenshot"],
                 "preview": scene["paths"]["preview"],
-                "tags": [{"id": tag["id"], "name": tag["name"]} for tag in scene.get("tags", [])
-                         if not (LIMIT_TO_TAG and str(tag.get("id")) == str(LIMIT_TO_TAG))],
+                "tags": [{"id": tag["id"], "name": tag["name"]}
+                         for tag in _visible_scene_tags(scene.get("tags", []))],
                 "performers": [{"id": p["id"], "name": p["name"]} for p in scene.get("performers", [])],
                 "studio": scene.get("studio", {}).get("name", "") if scene.get("studio") else "",
                 "resolution": (
@@ -458,6 +476,36 @@ async def tag_contains_scene(tag_id: str, video_id: int, respect_limit_tag: bool
         return count > 0
     except Exception as e:
         logger.error(f"Error probing scene {video_id} in tag {tag_id}: {e}")
+        return None
+
+
+async def get_scene_tag_ids(scene_id: int) -> set[str] | None:
+    """Return the set of ALL Stash tag ids a scene carries (as strings), or None
+    on any upstream error so callers can decide how to treat uncertainty.
+
+    Tiny indexed query (just ``findScene(id){ tags { id } }``) — the cheap
+    primitive behind the visibility resolver, which needs the raw tag set
+    (including internal/underscore and the limit tag) to test against the
+    configured visibility tag ids. Do NOT filter here: visibility decisions need
+    the unfiltered set; user-facing tag projection filtering lives elsewhere."""
+    query = {
+        "operationName": "FindScene",
+        "variables": {"id": str(scene_id)},
+        "query": "query FindScene($id: ID!) { findScene(id: $id) { tags { id } } }",
+    }
+    try:
+        response = await http_client.post(GRAPHQL_URL, json=query, headers=_graphql_headers())
+        response.raise_for_status()
+        data = response.json()
+        if data.get("errors"):
+            logger.error(f"GraphQL error reading tags for scene {scene_id}: {data['errors']}")
+            return None
+        scene = (data.get("data") or {}).get("findScene")
+        if scene is None:
+            return set()  # scene doesn't exist in Stash → it carries no tags
+        return {str(t["id"]) for t in scene.get("tags", [])}
+    except Exception as e:
+        logger.error(f"Error reading tags for scene {scene_id}: {e}")
         return None
 
 
@@ -645,8 +693,7 @@ async def get_video_details(stash_video_id: int) -> dict | None:
                 {
                     "name": t["name"],
                     "description": t.get("description")
-                } for t in scene.get("tags", [])
-                if not (LIMIT_TO_TAG and str(t.get("id")) == str(LIMIT_TO_TAG))
+                } for t in _visible_scene_tags(scene.get("tags", []))
             ],
             "movies": [m["movie"]["name"] for m in scene.get("movies", []) if m.get("movie")],
             "galleries": scene.get("galleries", [])
@@ -833,8 +880,7 @@ async def get_tags_for_scenes(scene_ids: list[int]) -> dict[int, list[dict]]:
         for scene in scenes:
             out[int(scene["id"])] = [
                 {"id": str(t["id"]), "name": t["name"]}
-                for t in scene.get("tags", [])
-                if not (LIMIT_TO_TAG and str(t.get("id")) == str(LIMIT_TO_TAG))
+                for t in _visible_scene_tags(scene.get("tags", []))
             ]
         return out
     except Exception as e:

@@ -49,7 +49,11 @@ async def generate_m3u8_file(share_id: str, stash_video_id: int, resolution: str
             if line.strip() and not line.startswith("#") and ".ts" in line:
                 # Extract segment name (e.g., "0.ts") from any URL, ignoring query parameters
                 segment = line.split("/")[-1].split("?")[0]
-                rewritten_lines.append(f"/share/{share_id}/stream/{segment}")
+                # Segments are scene-keyed: rewrite to the canonical /media route
+                # (not the legacy /share shim) so playback never eats a redirect
+                # hop per segment, regardless of which caller's share_id labels
+                # the cached playlist file.
+                rewritten_lines.append(f"/media/{stash_video_id}/stream/{segment}")
             else:
                 rewritten_lines.append(line)
 

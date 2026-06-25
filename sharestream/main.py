@@ -17,9 +17,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
 
+from sharestream.config import LIMIT_TO_TAG
 from sharestream.core.errors import register_error_handlers
 from sharestream.core.http_client import close_http_client
-from sharestream.db.migrations import init_db
+from sharestream.db.migrations import run_migrations
 from sharestream.routers import (
     admin,
     auth,
@@ -33,6 +34,7 @@ from sharestream.routers import (
     short_urls,
     site,
     tags,
+    video,
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -74,8 +76,18 @@ def create_app() -> FastAPI:
     # Error handling
     register_error_handlers(app)
 
-    # Database bootstrap + idempotent migrations
-    init_db()
+    # Database schema: stamp legacy DBs, then alembic upgrade head
+    run_migrations()
+
+    # limit_to_tag is retired as an access gate (Phase 2): scene visibility is now
+    # governed by visibility_tags. Warn once at startup if it's still configured.
+    if LIMIT_TO_TAG:
+        logger.warning(
+            "stash.limit_to_tag is set but is DEPRECATED as an access-control "
+            "mechanism. Scene visibility is now governed by stash.visibility_tags "
+            "(public/listed/hidden). limit_to_tag now only scopes curated Gallery "
+            "surfaces; configure visibility_tags and remove limit_to_tag when ready."
+        )
 
     # Routers — explicit routes first; short_urls (catch-all) LAST.
     app.include_router(site.router)
@@ -83,6 +95,7 @@ def create_app() -> FastAPI:
     app.include_router(admin.router)
     app.include_router(shares.router)
     app.include_router(tags.router)
+    app.include_router(video.router)
     app.include_router(media.router)
     app.include_router(embeds.router)
     app.include_router(dmca.router)

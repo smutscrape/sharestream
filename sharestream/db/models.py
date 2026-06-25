@@ -67,3 +67,27 @@ class TagVideoHit(Base):
     tag_share_id = Column(String, index=True)  # References SharedTag.share_id
     video_id = Column(Integer, index=True)      # Stash video ID
     hits = Column(Integer, default=0)
+
+
+class VideoOverride(Base):
+    """Per-video exceptions to the default Hashid-routed, tag-governed behavior.
+
+    A row exists ONLY for a scene that needs something Stash can't store: a
+    vanity slug and/or a password (with optional expiry). Most scenes have no
+    row and are reached purely by Hashid. Supersedes SharedVideo.
+    """
+    __tablename__ = "video_overrides"
+    id = Column(Integer, primary_key=True)
+    stash_video_id = Column(Integer, unique=True, index=True, nullable=False)
+    vanity_slug = Column(String, unique=True, index=True, nullable=True)
+    password_hash = Column(String, nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class SceneViews(Base):
+    """Play counts keyed by Stash scene id rather than by share, so every entry
+    path (canonical /v/, legacy redirects) contributes to one count. Supersedes
+    SharedVideo.hits and TagVideoHit."""
+    __tablename__ = "scene_views"
+    stash_video_id = Column(Integer, primary_key=True)
+    views = Column(Integer, default=0)

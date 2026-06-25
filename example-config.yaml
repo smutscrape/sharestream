@@ -33,6 +33,15 @@ sharestream:
   admin_password: your_secure_password
   default_resolution: MEDIUM # LOW MEDIUM OR HIGH
   share_id_length: 8
+  # Optional. Canonical video URLs (/v/{slug}) encode the Stash scene id with
+  # Sqids so the id is never exposed and adjacent guesses decode to nothing.
+  # slug_alphabet is a shuffled permutation of the 62 a-zA-Z0-9 characters that
+  # randomizes the output so ids aren't guessable in order. It MUST stay stable
+  # (changing it invalidates every existing /v/ link). If omitted, the default
+  # Sqids alphabet is used and URLs are NOT randomized (a warning is logged).
+  # slug_min_length pads short ids so a low scene id isn't a 1-2 char slug.
+  # slug_alphabet: "Fk7k2k... (a shuffled 62-char a-zA-Z0-9 string)"
+  slug_min_length: 6
   # Optional: default sort mode for the home page and tag-share galleries.
   # One of: date | title | hits | rating | duration | random (defaults to 'date').
   # Individual tag shares can override this in the admin panel.
@@ -47,7 +56,23 @@ stash:
   server_ip: 127.0.0.1
   port: 5588
   api_key: yourStashAPIKeyGoesHere
-  # limit_to_tag: 10844 # Optional: browsable pages (home + /gallery/tag) only show videos with BOTH the shared tag and this tag (by ID); a share's own pages stay limited only while featured on home with no password (password-protected or non-featured shares reach the full tag)
+  # limit_to_tag: 10844 # DEPRECATED as an access gate (Phase 2): scene visibility
+  #   is now governed by visibility_tags below. Still scopes curated Gallery
+  #   (tag-share) surfaces; logs a deprecation warning at startup when set.
+  #
+  # Config-driven scene visibility. Each is a Stash TAG ID; a scene's visibility
+  # is determined by which of these tags it carries:
+  #   public -> home + search + direct /v/ link
+  #   listed -> search + direct link, NOT home
+  #   hidden -> 404 everywhere (overrides all)
+  # A scene carrying NONE of these is "unlisted": reachable only via its
+  # unguessable /v/{slug} link (the slug itself is the capability). Any level you
+  # omit is simply disabled. These tags are internal — name them with a leading
+  # underscore (e.g. _public) and they're auto-hidden from the UI and /tag browse.
+  # visibility_tags:
+  #   public: 15328   # e.g. a Stash tag named "_public"
+  #   listed: 15329   # e.g. "_listed"
+  #   hidden: 15330   # e.g. "_banned"
 
 # Social-embed (og:video) policy for link previews on Lemmy/Mastodon/etc.
 # mode: preview | full | dynamic   (can be overridden per-share in the admin panel)

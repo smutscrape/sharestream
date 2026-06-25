@@ -10,20 +10,18 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from sharestream.backends.stash import get_video_details
 from sharestream.config import BASE_DOMAIN, SHARES_DIR
 from sharestream.core.branding import site_context
 from sharestream.core.security import get_current_user, pwd_context
 from sharestream.core.templates import render
 from sharestream.db.models import SharedTag, SharedVideo
 from sharestream.db.session import get_db
+from sharestream.services.slugs import canonical_video_slug
 from sharestream.schemas.shares import ShareVideoRequest
 from sharestream.services import access
-from sharestream.services.embed_policy import normalize_embed_mode, should_embed_full
-from sharestream.services.hits import get_total_plays, increment_share_hit
+from sharestream.services.embed_policy import normalize_embed_mode
 from sharestream.services.media_proxy import generate_m3u8_file
 from sharestream.services.slugs import generate_share_id, validate_custom_share_id
-from sharestream.services.visitors import log_first_visit
 
 logger = logging.getLogger(__name__)
 
@@ -140,46 +138,15 @@ async def delete_share(share_id: str,
 
 @router.get("/share/{share_id}", response_class=HTMLResponse, response_model=None)
 async def share_page(share_id: str, request: Request = None, db: Session = Depends(get_db)):
+    """Legacy individual-share URL → 301 to the canonical /v/{slug}, carrying the
+    unlock cookie so a viewer who unlocked the old link stays unlocked."""
     video = db.query(SharedVideo).filter_by(share_id=share_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="Share link not found")
-
-    log_first_visit(request, share_id, kind="share")
-
-    access.ensure_not_expired(video.expires_at, "Share link has expired")
-
-    # password gate
-    locked = access.password_prompt_if_locked(request, share_id, video.password_hash, video.video_name)
-    if locked is not None:
-        return locked
-
-    # count hit BEFORE showing page, then show the aggregate play count for this
-    # video across every share context (not just this individual share's tally).
-    increment_share_hit(db, video)
-    hit_count = get_total_plays(db, video.stash_video_id)
-
-    # Get full video details from Stash
-    video_details = await get_video_details(video.stash_video_id)
-
-    # Decide whether the og:video embed should be the full video or the short
-    # preview clip (per-share override, else config default).
-    _files = (video_details or {}).get("files") or []
-    _size = _files[0].get("size") if _files else None
-    _duration = (video_details or {}).get("duration")
-    if should_embed_full(video.embed_mode, _duration, _size):
-        embed_video_url = f"{BASE_DOMAIN}/{share_id}/full.mp4"
-    else:
-        embed_video_url = f"{BASE_DOMAIN}/share/{share_id}/stream.mp4"
-
-    context = site_context(request)
-    context.update(
-        video_name=video.video_name,
-        share_id=share_id,
-        video_details=video_details,
-        embed_video_url=embed_video_url,
-        hit_count=hit_count,
-    )
-    return HTMLResponse(render("video-player.html", **context))
+    slug = canonical_video_slug(db, video.stash_video_id)
+    resp = RedirectResponse(url=f"/v/{slug}", status_code=301)
+    access.carry_unlock_cookie(request, resp, share_id, video.stash_video_id)
+    return resp
 
 
 @router.post("/share/{share_id}/verify")

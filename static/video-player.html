@@ -6,34 +6,26 @@
     <title>{{ video_name or 'Video' }} - {{ site_name or 'Sharestream' }}</title>
     
     <!-- Open Graph / Social Media Meta Tags -->
-    {% set is_tag_share = share_id.startswith('tag-') and '-video-' in share_id %}
-    {% if is_tag_share %}
-        {% set parts = share_id.split('-video-') %}
-        {% set tag_share_id = parts[0][4:] %}
-        {% set video_id = parts[1] %}
-        {% set page_url  = base_domain + '/' + tag_share_id + '/' + video_id %}
-        {% set video_url = base_domain + '/tag/' + tag_share_id + '/video/' + video_id + '/stream.mp4' %}
-        {% set image_url = base_domain + '/tag/' + tag_share_id + '/video/' + video_id + '/thumb' %}
-        {# Poster = the real Stash screenshot; ?placeholder=false makes a missing
-           one 404 so the player stays black instead of showing the gallery
-           "No preview available" tile. #}
-        {% set poster_url = '/tag/' + tag_share_id + '/thumbnail/' + video_id + '?placeholder=false' %}
-    {% else %}
-        {% set page_url  = base_domain + '/' + share_id %}
-        {% set video_url = base_domain + '/share/' + share_id + '/stream.mp4' %}
-        {% set image_url = base_domain + '/share/' + share_id + '/thumb' %}
-        {% set poster_url = '/share/' + share_id + '/thumbnail.jpg?placeholder=false' %}
-    {% endif %}
+    {# All media is scene-keyed under /media/{stash_video_id}; the canonical page
+       URL (/v/{slug}, vanity or Sqids) is resolved server-side and passed in. #}
+    {% set media_base = '/media/' + stash_video_id|string %}
+    {% set page_url  = canonical_url %}
+    {% set video_url = base_domain + media_base + '/stream.mp4' %}
+    {% set image_url = base_domain + media_base + '/thumb' %}
+    {# Poster = the real Stash screenshot; ?placeholder=false makes a missing
+       one 404 so the player stays black instead of showing the gallery
+       "No preview available" tile. #}
+    {% set poster_url = media_base + '/thumbnail.jpg?placeholder=false' %}
 
     {# The server resolves whether to embed the full video or the preview clip
-       (per-share/tag override, else the config default) and passes the URL. #}
+       (per-scene override, else the config default) and passes the URL. #}
     {% if embed_video_url %}
         {% set video_url = embed_video_url %}
     {% endif %}
 
     {# Bare player page (no site chrome) for iframe embeds, e.g. Mastodon's
-       twitter:player. share_id is the token or composite tag-video id. #}
-    {% set embed_url = base_domain + '/embed/' + share_id %}
+       twitter:player, keyed to the scene id. #}
+    {% set embed_url = base_domain + '/embed/' + stash_video_id|string %}
 
     {# Try to parse "WxH" from video_details.resolution; fall back to 1280x720 #}
     {% set og_w = 1280 %}
@@ -46,6 +38,7 @@
         {% endif %}
     {% endif %}
 
+    <link rel="canonical" href="{{ page_url }}">
     <meta property="og:type"               content="video.other">
     <meta property="og:site_name"          content="{{ site_name or 'Sharestream' }}">
     <meta property="og:title"              content="{{ video_name or 'Video' }}">
@@ -104,7 +97,7 @@
         <div class="video-stage">
         <div class="video-container" id="video-box" data-arw="{{ og_w }}" data-arh="{{ og_h }}">
             <video id="video-player" class="video-js vjs-default-skin" controls preload="auto" poster="{{ poster_url }}" playsinline loop>
-                <source src="/share/{{ share_id }}/stream.m3u8" type="application/x-mpegURL">
+                <source src="{{ media_base }}/stream.m3u8" type="application/x-mpegURL">
                 Your browser does not support the video tag.
             </video>
         </div>
@@ -217,7 +210,7 @@
                     <h3>Tags</h3>
                     <div class="tag-list">
                         {% for tag in video_details.tags %}
-                        <a href="/gallery/tag/{{ tag.name | urlencode }}" class="tag-item">{{ tag.name }}</a>
+                        <a href="/tag/{{ tag.name | urlencode }}" class="tag-item">{{ tag.name }}</a>
                         {% endfor %}
                     </div>
                 </div>

@@ -33,7 +33,11 @@ import logging
 import time
 from threading import Lock
 
-from sharestream.backends.stash import get_tag_scene_ids, tag_contains_scene
+from sharestream.backends.stash import (
+    get_scene_tag_ids as _fetch_scene_tag_ids,
+    get_tag_scene_ids,
+    tag_contains_scene,
+)
 from sharestream.config import TAG_MEMBERSHIP_TTL_SECONDS
 
 logger = logging.getLogger(__name__)
@@ -183,3 +187,61 @@ async def is_video_in_tag(tag_id: str, video_id: int, respect_limit_tag: bool = 
         return await inflight
     finally:
         _scene_inflight.pop(skey, None)
+
+
+# ------------------------------------------------------------------
+# Per-scene tag-id set (visibility resolver hot path)
+# ------------------------------------------------------------------
+# The visibility resolver and the media gate ask "which tags does scene X carry"
+# on every /v/ render and every media sub-request (including each HLS segment).
+# Caching the scene's full tag-id set with the same TTL + single-flight discipline
+# means a segment storm for one video coalesces to a single Stash fetch, and the
+# resolver answers public/listed/hidden/unlisted from the cached set without
+# re-querying. Keyed by scene id alone (a scene's tags don't vary by requester).
+_scene_tags_cache: dict[int, tuple[float, set[str]]] = {}
+_scene_tags_inflight: dict[int, asyncio.Future] = {}
+
+
+def clear_scene_tag_cache() -> int:
+    """Drop all cached per-scene tag sets. Returns the number of entries evicted.
+    Call after a scene's tags change in Stash if an immediate refresh is needed
+    (otherwise entries expire after TAG_MEMBERSHIP_TTL_SECONDS)."""
+    with _cache_lock:
+        count = len(_scene_tags_cache)
+        _scene_tags_cache.clear()
+    logger.info(f"Cleared scene tag cache ({count} scene(s))")
+    return count
+
+
+async def _fetch_and_cache_scene_tags(scene_id: int) -> set[str]:
+    """Fetch a scene's tag-id set from Stash and cache it. On an upstream error
+    (None) we return an empty set WITHOUT caching, so a transient hiccup can't
+    pin a wrong (empty) answer for the whole TTL — the resolver treats 'no tags'
+    as unlisted-but-allowed, so not caching keeps the next request authoritative."""
+    ids = await _fetch_scene_tag_ids(scene_id)
+    if ids is None:
+        return set()
+    with _cache_lock:
+        _scene_tags_cache[int(scene_id)] = (time.time() + TAG_MEMBERSHIP_TTL_SECONDS, ids)
+    return ids
+
+
+async def get_scene_tag_ids(scene_id: int) -> set[str]:
+    """Return the set of Stash tag ids (as strings) a scene carries, TTL-cached
+    with single-flight coalescing. The unfiltered set (includes internal/limit
+    tags) — the visibility resolver tests it against the configured tag ids."""
+    sid = int(scene_id)
+    now = time.time()
+    with _cache_lock:
+        entry = _scene_tags_cache.get(sid)
+        if entry and entry[0] > now:
+            return entry[1]
+    inflight = _scene_tags_inflight.get(sid)
+    if inflight is not None:
+        return await inflight
+    inflight = asyncio.ensure_future(_fetch_and_cache_scene_tags(sid))
+    _scene_tags_inflight[sid] = inflight
+    try:
+        return await inflight
+    finally:
+        _scene_tags_inflight.pop(sid, None)
