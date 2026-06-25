@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Not Found - {{ site_name or 'Sharestream' }}</title>
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="{{ asset('static/styles.css') }}">
     <link rel="stylesheet" href="/fonts.css">
     <link rel="icon" href="/favicon.ico" sizes="any">
     <link rel="icon" type="image/png" href="/favicon.png">
@@ -12,14 +12,15 @@
 </head>
 <body>
     <div class="container">
-        <header>
-            <a href="{{ base_domain }}">
+        <header class="topbar">
+            <a class="topbar-logo" href="{{ base_domain }}">
                 <img src="{{ logo_path }}" srcset="{{ srcset }}" alt="Logo" class="logo">
             </a>
-            {% if site_motto %}
-            <div class="site-motto">{{ site_motto }}</div>
-            {% endif %}
+            <nav class="topbar-nav"><!-- reserved for search / tag-browse --></nav>
         </header>
+        {% if site_motto %}
+        <div class="site-motto">{{ site_motto }}</div>
+        {% endif %}
 
         <div class="not-found">
             <h1 class="not-found-title">Nothing to see here</h1>

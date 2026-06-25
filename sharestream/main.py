@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
 
 from sharestream.core.errors import register_error_handlers
 from sharestream.core.http_client import close_http_client
@@ -38,6 +39,17 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 
+class ImmutableStaticFiles(StaticFiles):
+    """Serve /static with a far-future immutable cache. Safe because templates
+    reference these files through the ``asset()`` helper, which appends an mtime
+    query string — so an edited file gets a new URL and is never served stale."""
+
+    def file_response(self, *args, **kwargs) -> Response:
+        resp = super().file_response(*args, **kwargs)
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return resp
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
@@ -57,7 +69,7 @@ def create_app() -> FastAPI:
     )
 
     # Static assets
-    app.mount("/static", StaticFiles(directory="static"), name="static")
+    app.mount("/static", ImmutableStaticFiles(directory="static"), name="static")
 
     # Error handling
     register_error_handlers(app)

@@ -63,6 +63,11 @@ embed:
 # Gallery layout policy. Both default to false (omit the whole section to keep
 # the classic cropped grid everywhere).
 gallery:
+  # How many video cards a gallery page shows (tag galleries paginate at this
+  # size; the home page shows this many as a teaser). Defaults to 36 if omitted.
+  per_page: 36
+  # Optional separate teaser size for the home page (falls back to per_page).
+  # home_per_page: 48
   # When true, the home page "All Videos" gallery (the individual video cards
   # below the featured collections) uses a masonry layout that keeps each
   # video's native aspect ratio, instead of cropping all cards to one shape.

@@ -89,6 +89,21 @@ EMBED_MAX_FULL_SIZE_MB = EMBED_CONFIG.get('max_full_size_mb')    # megabytes or 
 GALLERY_CONFIG = config.get('gallery', {}) or {}
 GALLERY_HOME_MASONRY = bool(GALLERY_CONFIG.get('home_masonry', False))
 GALLERY_MASONRY_DEFAULT = bool(GALLERY_CONFIG.get('masonry_default', False))
+# How many video cards a gallery page (tag gallery, home teaser) shows. Defaults
+# to 36 when unset/invalid. home_per_page optionally overrides the home page's
+# teaser size, falling back to per_page.
+try:
+    GALLERY_PER_PAGE = int(GALLERY_CONFIG.get('per_page', 36) or 36)
+    if GALLERY_PER_PAGE <= 0:
+        raise ValueError
+except (TypeError, ValueError):
+    GALLERY_PER_PAGE = 36
+try:
+    GALLERY_HOME_PER_PAGE = int(GALLERY_CONFIG.get('home_per_page', GALLERY_PER_PAGE) or GALLERY_PER_PAGE)
+    if GALLERY_HOME_PER_PAGE <= 0:
+        raise ValueError
+except (TypeError, ValueError):
+    GALLERY_HOME_PER_PAGE = GALLERY_PER_PAGE
 
 # Caching policy. Tag membership checks (does video X belong to shared tag Y?)
 # are cached per tag for this many minutes to avoid re-querying Stash on every

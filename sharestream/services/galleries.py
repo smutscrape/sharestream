@@ -23,7 +23,13 @@ from sharestream.backends.stash import (
     get_tag_description,
     get_videos_by_tag,
 )
-from sharestream.config import BASE_DOMAIN, GALLERY_HOME_MASONRY, VALID_SORTS
+from sharestream.config import (
+    BASE_DOMAIN,
+    GALLERY_HOME_MASONRY,
+    GALLERY_HOME_PER_PAGE,
+    GALLERY_PER_PAGE,
+    VALID_SORTS,
+)
 from sharestream.core.branding import site_context
 from sharestream.db.models import SharedTag, SharedVideo
 from sharestream.services.access import tag_share_respects_limit_tag
@@ -35,11 +41,6 @@ from sharestream.services.thumbnails import (
 )
 
 logger = logging.getLogger(__name__)
-
-# How many video cards a single gallery view (home page, tag gallery page)
-# shows. The tag gallery paginates at this size; the home page shows this many
-# as a teaser of the full library (the real total is shown in the header).
-GALLERY_PAGE_SIZE = 36
 
 
 def format_count(n: int) -> str:
@@ -301,7 +302,7 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
 
     # Paginate the combined list the same way the tag galleries do: capture the
     # full total (for the header) BEFORE slicing to the current page's worth.
-    per_page = GALLERY_PAGE_SIZE
+    per_page = GALLERY_HOME_PER_PAGE
     total_videos = len(all_video_cards)
     total_pages = (total_videos + per_page - 1) // per_page  # ceiling division
     has_more_pages = page < total_pages
@@ -350,7 +351,7 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
                                     page: int = 1, sort: str = 'date', request=None) -> dict:
     """Assemble the paginated gallery context for a single tag share's page."""
     # Set pagination parameters
-    per_page = GALLERY_PAGE_SIZE  # videos per page
+    per_page = GALLERY_PER_PAGE  # videos per page
     # Ensure page is at least 1
     if page < 1:
         page = 1

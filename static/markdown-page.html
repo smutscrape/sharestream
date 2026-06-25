@@ -20,7 +20,7 @@
     <meta name="twitter:description" content="{{ og_desc }}">
     <meta name="twitter:image"       content="{{ og_image }}">
 
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="{{ asset('static/styles.css') }}">
     <link rel="stylesheet" href="/fonts.css">
     <link rel="icon" href="/favicon.ico" sizes="any">
     <link rel="icon" type="image/png" href="/favicon.png">
@@ -29,14 +29,15 @@
 <body{% if show_content_warning %} class="cw-locked"{% endif %}>
     {% include "content-warning.html" %}
     <div class="container">
-        <header>
-            <a href="{{ base_domain }}">
+        <header class="topbar">
+            <a class="topbar-logo" href="{{ base_domain }}">
                 <img src="{{ logo_path }}" srcset="{{ srcset }}" alt="Logo" class="logo">
             </a>
-            {% if site_motto %}
-            <div class="site-motto">{{ site_motto }}</div>
-            {% endif %}
+            <nav class="topbar-nav"><!-- reserved for search / tag-browse --></nav>
         </header>
+        {% if site_motto %}
+        <div class="site-motto">{{ site_motto }}</div>
+        {% endif %}
 
         <article class="markdown-page">
             <h1 class="markdown-page-title">{{ page_title }}</h1>

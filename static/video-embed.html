@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ video_name or 'Video' }}</title>
     <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
-    <link href="/static/video-player.css" rel="stylesheet">
+    <link href="{{ asset('static/video-player.css') }}" rel="stylesheet">
     <style>
         html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
         .embed-stage { position: fixed; inset: 0; }
