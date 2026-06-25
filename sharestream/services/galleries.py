@@ -195,14 +195,23 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
     tag_video_results = await asyncio.gather(
         *(get_videos_by_tag(tag.stash_tag_id) for tag in tag_shares)
     ) if tag_shares else []
+    # Resolve slugs for collection-tag media URLs up front so cards use the
+    # Hashid (non-sequential) — never the raw stash_video_id — in thumb/preview URLs.
+    _tag_card_vids = set()
+    for _t, (tag_videos, _tc) in zip(tag_shares, tag_video_results):
+        for _v in (tag_videos or []):
+            _tag_card_vids.add(int(_v["id"]))
+    _tag_card_slugs = canonical_video_slugs(db, _tag_card_vids) if _tag_card_vids else {}
+
     for tag, (tag_videos, total_count) in zip(tag_shares, tag_video_results):
         if tag_videos:
             first_video = tag_videos[0]
             _first_id = int(first_video["id"])
+            _first_sqid = _tag_card_slugs.get(_first_id, str(_first_id))
             warm_coros.append(fetch_and_cache_thumbnail(str(_first_id), _first_id))
-            thumbnail_url = f"/media/{_first_id}/thumbnail.jpg"
+            thumbnail_url = f"/media/{_first_sqid}/thumbnail.jpg"
             sample = random.sample(tag_videos, min(len(tag_videos), 12))
-            preview_webps = [f"/media/{int(v['id'])}/webp" for v in sample]
+            preview_webps = [f"/media/{_tag_card_slugs.get(int(v['id']), int(v['id']))}/webp" for v in sample]
             tag_cards.append({
                 "share_id": tag.share_id,
                 "tag_name": tag.tag_name,
@@ -227,16 +236,21 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
     public_ids = [int(v["id"]) for v in public_videos]
     total_plays = get_total_plays_map(db, public_ids)
 
-    # 3. Build a card per public-tagged scene. Each links to canonical /v/{slug}
-    # (filled in batch below) and draws media from /media/{stash_video_id}/...
+    # Resolve every PUBLIC scene's slug up front so all generated URLs —
+    # preview, thumbnail, share link Hashid, never the sequential id.
+    slug_map = canonical_video_slugs(db, public_ids)
+
+    # 3. Build a card per public-tagged scene. All generated media URLs use the
+    # slug from slug_map; the stash id is tracked internally for sort/filter.
     all_video_cards = []
     for video in public_videos:
         vid = int(video["id"])
+        vid_sqid = slug_map.get(vid, str(vid))
         all_video_cards.append({
             "video_name": video.get("title"),
-            "preview_url": f"/media/{vid}/webp",
-            "thumbnail_url": None,  # Will be lazy loaded
-            "lazy_thumbnail_url": f"/media/{vid}/thumbnail.jpg",
+            "preview_url": f"/media/{vid_sqid}/webp",
+            "thumbnail_url": None,  # Will be filled below after pagination
+            "lazy_thumbnail_url": f"/media/{vid_sqid}/thumbnail.jpg",
             "hits": total_plays.get(vid, 0),
             "duration": video.get("duration") or 0,
             "duration_label": format_duration(video.get("duration")),
@@ -269,20 +283,13 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
     start = (page - 1) * per_page
     all_video_cards = all_video_cards[start:start + per_page]
 
-    # Resolve every card's canonical /v/ link in one batched query.
-    slug_map = canonical_video_slugs(db, [c['stash_video_id'] for c in all_video_cards])
+    # Fill canonical /v/ link and thumbnail URL (now keyed to the slug).
     for card in all_video_cards:
         card['share_url'] = f"/v/{slug_map[int(card['stash_video_id'])]}"
-
-    # Pre-warm the on-disk cache for the shown videos so they paint instantly,
-    # but always point the <img> at the access-gated /media route (never a raw
-    # /static path). Warming is queued and run concurrently (below) so the page
-    # isn't gated on a serial chain of Stash fetches. Thumbnails are now cached
-    # by scene id, so warming and the URL both key on stash_video_id.
-    for card in all_video_cards:
-        sid = int(card['stash_video_id'])
-        warm_coros.append(fetch_and_cache_thumbnail(str(sid), sid))
-        card['thumbnail_url'] = f"/media/{sid}/thumbnail.jpg"
+        sqid = slug_map[int(card['stash_video_id'])]
+        card['thumbnail_url'] = f"/media/{sqid}/thumbnail.jpg"
+        warm_coros.append(fetch_and_cache_thumbnail(str(int(card['stash_video_id'])),
+                                                   int(card['stash_video_id'])))
 
     await _warm_thumbnails(warm_coros)
 
@@ -373,7 +380,7 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
     warm_coros = []
     for i, video in enumerate(videos):
         vid = int(video["id"])
-        thumb_route = f"/media/{vid}/thumbnail.jpg"
+        thumb_route = f"/media/{slug_map[vid]}/thumbnail.jpg"
         eager = i < 20
         if eager:
             warm_coros.append(fetch_and_cache_thumbnail(str(vid), vid))
@@ -381,7 +388,7 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
         video_cards.append({
             "video_name": video["title"],
             "share_url": f"/v/{slug_map[vid]}",
-            "preview_url": f"/media/{vid}/webp",
+            "preview_url": f"/media/{slug_map.get(vid, vid)}/webp",
             "thumbnail_url": thumb_route if eager else "/static/default_thumbnail.jpg",
             "lazy_thumbnail_url": thumb_route if not eager else None,
             "hits": total_plays.get(vid, 0),
@@ -468,9 +475,9 @@ async def build_tag_name_gallery_context(db: Session, tag_name: str, request=Non
             warm_coros.append(fetch_and_cache_thumbnail(str(sid), sid))
             video_cards.append({
                 "stash_video_id": sid,
-                "preview_url": f"/media/{sid}/webp",
+                "preview_url": None,  # backfilled from slug_map below
                 "video_name": video.video_name,
-                "thumbnail_url": f"/media/{sid}/thumbnail.jpg",
+                "thumbnail_url": None,  # backfilled from slug_map below
                 "hits": total_plays.get(sid, 0),
                 "duration_label": format_duration(durations.get(sid)),
                 "lazy_thumbnail_url": None,
@@ -489,13 +496,12 @@ async def build_tag_name_gallery_context(db: Session, tag_name: str, request=Non
             video_id = int(video['id'])
             if video_id in target_video_ids and video_id not in processed_video_ids:
                 logger.debug(f"Found match in tag share '{tag_share.tag_name}': video_id={video_id}")
-                # Use lazy loading for thumbnails here for performance
                 video_cards.append({
                     "stash_video_id": video_id,
-                    "preview_url": f"/media/{video_id}/webp",
+                    "preview_url": None,
                     "video_name": video["title"],
                     "thumbnail_url": "/static/default_thumbnail.jpg",
-                    "lazy_thumbnail_url": f"/media/{video_id}/thumbnail.jpg",
+                    "lazy_thumbnail_url": None,
                     "hits": total_plays.get(video_id, 0),
                     "duration_label": format_duration(video.get("duration")),
                 })
@@ -503,10 +509,17 @@ async def build_tag_name_gallery_context(db: Session, tag_name: str, request=Non
 
     await _warm_thumbnails(warm_coros)
 
-    # Resolve each card's canonical /v/ link in one batched query.
+    # Resolve every card's Hashid slug in one batched query, then backfill ALL
+    # generated URLs so nothing exposes the sequential stash id.
     slug_map = canonical_video_slugs(db, [c["stash_video_id"] for c in video_cards])
     for card in video_cards:
-        card["share_url"] = f"/v/{slug_map[int(card['stash_video_id'])]}"
+        sqid = slug_map[int(card["stash_video_id"])]
+        card["preview_url"] = f"/media/{sqid}/webp"
+        if card["thumbnail_url"] is None:
+            card["thumbnail_url"] = f"/media/{sqid}/thumbnail.jpg"
+        if card["lazy_thumbnail_url"] is None:
+            card["lazy_thumbnail_url"] = f"/media/{sqid}/thumbnail.jpg"
+        card["share_url"] = f"/v/{sqid}"
 
     # Sort video cards by name (A→Z), untitled videos last.
     video_cards.sort(key=lambda x: _title_sort_key(x.get('video_name')))

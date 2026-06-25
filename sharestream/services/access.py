@@ -363,65 +363,131 @@ def authorize_share_media(request: Request, db: Session, share_id: str,
 # Visibility is config-driven (visibility_tags: public/listed/hidden). Access and
 # *listing* are separate concerns: this resolver governs whether a /v/{slug} link
 # loads; the public/listed tags govern what appears on Home/Search. An unlisted
-# scene (none of the configured tags) IS reachable by its unguessable slug — the
-# slug is the capability. Only the hidden tag and a VideoOverride password gate.
-async def resolve_scene_access(request: Request, db: Session, stash_video_id: int) -> str:
+# scene (none of the configured tags) IS reachable by its individual-share slug
+# (the capability) but NOT by the global /v/{slug} route.
+#
+# ``origin`` selects which policy applies:
+#   - "global"  → the /v/{slug} route: stash-tag visibility governs; a
+#                  VideoOverride.password_hash is ignored so a PUBLIC video can
+#                  be viewed globally without knowing its individual-share password.
+#   - "override" → the /{slug} individual-share route: only the
+#                  VideoOverride.password_hash governs; tag visibility is ignored
+#                  (an unlisted scene is reachable via its share slug).
+async def resolve_scene_access(request: Request, db: Session, stash_video_id: int,
+                               origin: str = "global") -> str:
     """Resolve access to a Stash scene, returning ACCESS_ALLOW /
     ACCESS_PASSWORD_REQUIRED / ACCESS_NOT_FOUND.
 
-    1. hidden tag present → NOT_FOUND (overrides everything).
-    2. VideoOverride: past expiry → NOT_FOUND; password set & no valid scene
-       cookie → PASSWORD_REQUIRED.
-    3. otherwise (public / listed / unlisted) → ALLOW.
+    **Global /v/{slug} path** (origin="global"):
+      1. hidden tag present → NOT_FOUND.
+      2. public / listed tag → ALLOW.
+      3. unlisted (no relevant tags) → NOT_FOUND (not reachable statelessly).
+      A VideoOverride.password_hash is deliberately NOT checked here: a video
+      tagged PUBLIC must play freely in galleries/embeds without prompting.
+
+    **Individual-share /{slug} path** (origin="override"):
+      1. Look up the VideoOverride row for the scene.
+      2. Row missing → ALLOW (no override => no gate).
+      3. Override past expiry → NOT_FOUND.
+      4. Override.password_hash set & no valid scene-keyed cookie →
+         PASSWORD_REQUIRED.
+      5. Otherwise → ALLOW. Stash tag visibility is ignored — an unlisted scene
+         is still reachable via its share slug (the slug is the capability).
 
     The scene's tag set is TTL-cached + single-flight, so this is cheap on the
     hot path. On a transient Stash error the tag set comes back empty (and is not
-    cached), so the scene reads as unlisted → ALLOW; a hidden scene could briefly
-    be reachable by its slug during a Stash outage, but since the whole site
-    proxies Stash, media wouldn't load then anyway. ``db`` is the request session.
+    cached), so the scene reads as unlisted → NOT_FOUND on the global path (a
+    brief 404, not a leak) and ALLOW on the individual-share path.
     """
     sid = int(stash_video_id)
-    tag_ids = await get_scene_tag_ids(sid)
-    if scene_visibility(tag_ids) == VIS_HIDDEN:
-        return ACCESS_NOT_FOUND
-    override = db.query(VideoOverride).filter(VideoOverride.stash_video_id == sid).first()
-    if override is not None:
+
+    if origin == "override":
+        override = db.query(VideoOverride).filter(VideoOverride.stash_video_id == sid).first()
+        if override is None:
+            return ACCESS_ALLOW
         if override.expires_at is not None and is_expired(override.expires_at):
             return ACCESS_NOT_FOUND
         if override.password_hash and not has_valid_pw_cookie(request, str(sid)):
             return ACCESS_PASSWORD_REQUIRED
+        return ACCESS_ALLOW
+
+    # --- origin == "global" (default) ---
+    tag_ids = await get_scene_tag_ids(sid)
+    if scene_visibility(tag_ids) == VIS_HIDDEN:
+        return ACCESS_NOT_FOUND
+    if scene_visibility(tag_ids) not in (VIS_PUBLIC, VIS_LISTED):
+        # Unlisted scenes can't be reached by their unguessable /v/{slug} statelessly.
+        return ACCESS_NOT_FOUND
     return ACCESS_ALLOW
 
 
 async def authorize_scene_media(request: Request, stash_video_id: int) -> bool:
     """Gate a media sub-request keyed to a Stash scene id (the /media/{id}/...
     routes) and RETURN whether the media is publicly cacheable. Raises 404
-    (hidden/expired) or 403 ("Password required") to match the media-route
+    (hidden/expired) or 403 ("Password required") to follow the media-route
     contract (no human prompt on a sub-request).
+
+    Media routes lack URL-path context (no /v/ vs //{slug}), so they authorize
+    from *any* valid capability:
+      1. scene carries PUBLIC / LISTED stash tags → ALLOW (public-cacheable).
+      2. request carries a valid scene-keyed unlock cookie (set by the
+         /{slug} VideoOverride password flow) → ALLOW.
+      3. request carries a valid unlock cookie for a SharedTag (gated
+         gallery) that contains this scene → ALLOW.
+    Otherwise → 403.
 
     Returns ``True`` only for public/listed scenes with no password — those bytes
     are identical for everyone and safe for a shared CDN. Unlisted/hidden/
     password-protected → ``False`` (callers send ``private, no-store``).
 
-    Owns a short-lived session for the override lookup and CLOSES it before the
-    network-bound tag fetch — like :func:`authorize_tag_video` — so a burst of
-    segment requests doesn't pin DB connections across that await. Cookie-only
-    for passwords (no ?pwd= on media), keyed to the scene id."""
+    Owns a short-lived session for the override + tag-share lookups and CLOSES
+    it before the network-bound tag fetch — like :func:`authorize_tag_video` —
+    so a burst of segment requests doesn't pin DB connections across that await.
+    Cookie-only for passwords (no ?pwd= on media), keyed to the scene id."""
     sid = int(stash_video_id)
     with SessionLocal() as db:
         override = db.query(VideoOverride).filter(VideoOverride.stash_video_id == sid).first()
         ov_expires = override.expires_at if override else None
         ov_password = override.password_hash if override else None
     # ---- session released; no DB connection held past this point ----
+
     tag_ids = await get_scene_tag_ids(sid)
-    level = scene_visibility(tag_ids)
-    if level == VIS_HIDDEN:
+
+    # Hidden tag → always 404 regardless of capabilities.
+    if VISIBILITY_HIDDEN and VISIBILITY_HIDDEN in tag_ids:
         raise HTTPException(status_code=404, detail="Video not found")
+
+    # Expired override → 404.
     if ov_expires is not None and is_expired(ov_expires):
         raise HTTPException(status_code=404, detail="Video not found")
-    if ov_password and not media_access_ok(request, str(sid), ov_password):
-        raise HTTPException(status_code=403, detail="Password required")
-    return level in (VIS_PUBLIC, VIS_LISTED) and not ov_password
+
+    # 1. PUBLIC / LISTED stash tag → ALLOW. Public-cacheable only when there's
+    #    no per-scene password (the password only gates the /{slug} landing page,
+    #    not the bytes themselves).
+    level = scene_visibility(tag_ids)
+    if level in (VIS_PUBLIC, VIS_LISTED):
+        return not ov_password
+
+    # Not publicly visible by stash tag. Check capability cookies:
+    # 2. Scene-keyed unlock cookie (set by the VideoOverride password flow).
+    if ov_password and media_access_ok(request, str(sid), ov_password):
+        return False  # allowed but private (don't CDN-cache password-gated bytes)
+
+    # 3. SharedTag (gated gallery) cookie: any active tag share whose cookie is
+    #    valid for one of this scene's stash tags.
+    with SessionLocal() as db:
+        active_tag_shares = db.query(SharedTag).filter(
+            SharedTag.password_hash.isnot(None),
+        ).all()
+    scene_tag_ids = {str(t) for t in tag_ids}
+    for tag_share in active_tag_shares:
+        if tag_share.stash_tag_id not in scene_tag_ids:
+            continue
+        if has_valid_pw_cookie(request, tag_share.share_id):
+            return False  # allowed but private
+
+    # 4. No capability → 403.
+    raise HTTPException(status_code=403, detail="Password required")
 
 
 def carry_unlock_cookie(request: Request, response, legacy_share_id: str, stash_video_id: int) -> None:

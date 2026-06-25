@@ -14,9 +14,9 @@ from sharestream.config import BASE_DOMAIN, SHARES_DIR
 from sharestream.core.branding import site_context
 from sharestream.core.security import get_current_user, pwd_context
 from sharestream.core.templates import render
-from sharestream.db.models import SharedTag, SharedVideo
+from sharestream.db.models import SharedTag, SharedVideo, VideoOverride
 from sharestream.db.session import get_db
-from sharestream.services.slugs import canonical_video_slug
+from sharestream.services.slugs import RESERVED_SLUGS, canonical_video_slug
 from sharestream.schemas.shares import ShareVideoRequest
 from sharestream.services import access
 from sharestream.services.embed_policy import normalize_embed_mode
@@ -32,46 +32,82 @@ router = APIRouter()
 async def share_video(request: ShareVideoRequest,
                       current_user: str = Depends(get_current_user),
                       db: Session = Depends(get_db)):
+    """Create a share for a scene.
+
+    - Custom slug OR password → creates a ``VideoOverride``; returns the
+      individual-share URL ``/{slug}`` (the slug is the capability).
+    - Neither → returns the stateless ``/v/{sqid}`` URL; no DB row is created
+      for the share (no VideoOverride, no SharedVideo).
+    """
     expires_at = datetime.datetime.now(timezone.utc) + datetime.timedelta(days=request.days_valid)
     try:
-        if request.custom_share_id:
-            share_id = validate_custom_share_id(request.custom_share_id, db)
-        else:
-            share_id = generate_share_id()
+        has_capability = bool(request.custom_share_id) or bool(request.password)
 
-        password_hash = None
-        if request.password:
-            password_hash = pwd_context.hash(request.password)
+        if has_capability:
+            # Validate / generate the custom slug.
+            if request.custom_share_id:
+                vanity_slug = validate_custom_share_id(request.custom_share_id, db)
+            else:
+                # No custom slug but a password was set: mint a random, unguessable
+                # slug so the share has a concrete /{slug} URL to send the viewer to.
+                vanity_slug = _mint_unique_slug(db)
 
-        shared_video = SharedVideo(
-            share_id=share_id,
-            video_name=request.video_name,
-            stash_video_id=request.stash_video_id,
-            expires_at=expires_at,
-            hits=0,
-            resolution=request.resolution,
-            password_hash=password_hash,
-            show_in_gallery=request.show_in_gallery if hasattr(request, 'show_in_gallery') else False,
-            embed_mode=normalize_embed_mode(request.embed_mode)
-        )
-        db.add(shared_video)
-        db.commit()
+            password_hash = pwd_context.hash(request.password) if request.password else None
 
-        # Generate static .m3u8 file
-        if not await generate_m3u8_file(share_id, request.stash_video_id, request.resolution):
-            raise HTTPException(status_code=500, detail="Failed to generate .m3u8 file")
+            override = db.query(VideoOverride).filter(
+                VideoOverride.stash_video_id == request.stash_video_id).first()
+            if override is not None:
+                # Update the existing override in place.
+                override.vanity_slug = vanity_slug
+                override.password_hash = password_hash
+                override.expires_at = expires_at
+            else:
+                override = VideoOverride(
+                    stash_video_id=request.stash_video_id,
+                    vanity_slug=vanity_slug,
+                    password_hash=password_hash,
+                    expires_at=expires_at,
+                )
+                db.add(override)
+            db.commit()
 
-        logger.info(f"Video shared: share_id={share_id}, stash_video_id={request.stash_video_id}, resolution={request.resolution}")
-        share_url = f"{BASE_DOMAIN}/{share_id}"
-        if request.password:
-            share_url += f"?pwd={request.password}"
-        return {"share_url": share_url}
+            logger.info(f"Video share (override): vanity_slug={vanity_slug}, "
+                        f"stash_video_id={request.stash_video_id}, "
+                        f"resolution={request.resolution}, has_password={bool(password_hash)}")
+            share_url = f"{BASE_DOMAIN}/{vanity_slug}"
+            if request.password:
+                share_url += f"?pwd={request.password}"
+            return {"share_url": share_url}
+
+        # No capability: just return the global /v/{sqid} stateless URL.
+        from sharestream.services.slugs import encode_video_id
+        sqid = encode_video_id(request.stash_video_id)
+        logger.info(f"Video share (stateless): stash_video_id={request.stash_video_id}, "
+                    f"resolution={request.resolution}")
+        return {"share_url": f"{BASE_DOMAIN}/v/{sqid}"}
     except HTTPException:
         # Surface validation errors (e.g. reserved/duplicate custom slug) as-is.
         raise
     except Exception as e:
         logger.error(f"Error sharing video: {e}")
         raise HTTPException(status_code=500, detail="Failed to share video")
+
+
+def _mint_unique_slug(db: Session, length: int = 10) -> str:
+    """Generate a random, unique vanity slug that passes reserved-word checks."""
+    import secrets
+    alphabet = "abcdefghijkmnpqrstuvwxyz23456789"
+    for _ in range(100):
+        slug = "u" + "".join(secrets.choice(alphabet) for _ in range(length - 1))
+        if slug in RESERVED_SLUGS:
+            continue
+        from sharestream.db.models import SharedTag
+        if db.query(VideoOverride).filter(VideoOverride.vanity_slug == slug).first() or \
+           db.query(SharedTag).filter(SharedTag.share_id == slug).first() or \
+           db.query(SharedVideo).filter(SharedVideo.share_id == slug).first():
+            continue
+        return slug
+    raise HTTPException(status_code=500, detail="Failed to generate a unique share slug")
 
 
 @router.put("/edit_share/{share_id}")

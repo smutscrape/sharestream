@@ -1,19 +1,20 @@
 """All media routes.
 
-Canonical media lives under ``/media/{stash_video_id}/...`` (HLS playlist +
-segments, MP4 preview, full MP4, animated WebP, social thumbnails, cached
-screenshot). Every canonical route gates on the scene id via
+Canonical media lives under ``/media/{sqid}/...`` (HLS playlist + segments,
+MP4 preview, full MP4, animated WebP, social thumbnails, cached screenshot).
+The route parameter is the video's Hashid (Sqids encoding), NOT the raw
+Stash scene id — an ``{sqid}`` is decoded to the internal Stash id before any
+media proxy or access check. This guarantees no sequential id ever leaks into
+a URL, a 301, or a response header, so guessing adjacent scenes is infeasible.
+
+Every canonical route gates on the decoded Stash id via
 ``access.authorize_scene_media`` before proxying, then delegates to the
 ``media_proxy.*`` helpers (which take a ``stash_video_id`` + resolution).
 
 The legacy per-share / per-tag-video media paths are kept as **301 redirect
-shims** to their canonical ``/media/{id}/...`` target, carrying the unlock
-cookie forward so a viewer who unlocked a legacy URL stays unlocked. The only
-non-scene media route that stays put is ``/tag/{share_id}/collection-thumb``
-(it's a gallery montage, not a single scene).
+shims** to their canonical ``/media/{sqid}/...`` target.
 
-Resolution is no longer keyed per-URL (a bare scene id has no share row), so it
-defaults to ``DEFAULT_RESOLUTION``.
+Resolution is no longer keyed per-URL; it defaults to ``DEFAULT_RESOLUTION``.
 """
 from __future__ import annotations
 
@@ -32,6 +33,7 @@ from sharestream.services.collection_thumbnails import (
 )
 from sharestream.services.gif_thumbnails import build_and_cache_collection_gif
 from sharestream.services.resolver import resolve_media
+from sharestream.services.slugs import decode_video_id
 from sharestream.services.thumbnails import fetch_and_cache_thumbnail
 
 logger = logging.getLogger(__name__)
@@ -53,64 +55,77 @@ _M3U8_HEADERS = {
 }
 
 
+def _sqid_to_sid(sqid: str) -> int | None:
+    """Decode a Hashid slug to a Stash scene id, or None if the slug is not a
+    canonical Hashid. The route parameter is an ``{sqid}`` — never a raw id."""
+    if sqid.isdigit():
+        # The legacy path still permits raw numeric ids; 404 those to stop
+        # guessing. Decode via the same canonical re-encode check the Hashid lib
+        # uses, so non-canonical padded/aliased forms fail too.
+        return None
+    sid = decode_video_id(sqid)
+    return sid
+
+
 # ------------------------------------------------------------------
 # Legacy → canonical redirect helpers
 # ------------------------------------------------------------------
 def _legacy_redirect(request: Request, share_id: str, suffix: str) -> RedirectResponse:
-    """301 a legacy ``/share/{share_id}/<suffix>`` or composite media URL to the
-    canonical ``/media/{stash_video_id}/<suffix>``, carrying the unlock cookie."""
+    """301 a legacy ``/share/{share_id}/<suffix>`` media URL to the canonical
+    ``/media/{sqid}/<suffix>``, carrying the unlock cookie."""
     with SessionLocal() as db:
         resolved = resolve_media(db, share_id)
     if not resolved:
         raise HTTPException(status_code=404, detail="Share link not found")
-    resp = RedirectResponse(url=f"/media/{resolved.stash_video_id}/{suffix}", status_code=301)
+    from sharestream.services.slugs import encode_video_id
+    sqid = encode_video_id(resolved.stash_video_id)
+    resp = RedirectResponse(url=f"/media/{sqid}/{suffix}", status_code=301)
     access.carry_unlock_cookie(request, resp, resolved.cookie_share_id, resolved.stash_video_id)
     return resp
 
 
 def _legacy_tag_redirect(request: Request, share_id: str, video_id: int, suffix: str) -> RedirectResponse:
     """301 a legacy ``/tag/{share_id}/video/{video_id}/<suffix>`` media URL to the
-    canonical ``/media/{video_id}/<suffix>``, carrying the unlock cookie (keyed to
-    the TAG share id, since that's how the legacy cookie was set)."""
-    resp = RedirectResponse(url=f"/media/{video_id}/{suffix}", status_code=301)
+    canonical ``/media/{sqid}/<suffix>``, carrying the unlock cookie."""
+    from sharestream.services.slugs import encode_video_id
+    sqid = encode_video_id(video_id)
+    resp = RedirectResponse(url=f"/media/{sqid}/{suffix}", status_code=301)
     access.carry_unlock_cookie(request, resp, share_id, video_id)
     return resp
 
 
 # ------------------------------------------------------------------
-# Canonical scene media: /media/{stash_video_id}/...
+# Visibility-driven cache-header helpers
 # ------------------------------------------------------------------
-# Visibility-driven caching: public/listed scenes with no password serve
-# format-stable VIDEO bytes (m3u8, segments, mp4) as `public` (CDN-cacheable);
-# unlisted/hidden/password media is forced to `private, no-store` so it never
-# lands in a shared cache. The NEGOTIATED thumb/webp routes are a special case:
-# they serve different bytes per client (WebP vs JPEG vs GIF), so they keep their
-# own `private` + `Vary` headers even when public — promoting them to `public`
-# would let a CDN serve one client's format to another. We only TIGHTEN those
-# (to no-store) when the scene isn't publicly cacheable.
 def _apply_video_cache(resp, cacheable: bool):
-    """For format-stable video byte responses: `public` when cacheable, else
-    `private, no-store`."""
+    """For format-stable video byte responses: ``public`` when cacheable, else
+    ``private, no-store``."""
     resp.headers["Cache-Control"] = "public" if cacheable else "private, no-store"
     return resp
 
 
 def _tighten_if_private(resp, cacheable: bool):
     """For negotiated image responses (thumb/webp): leave the helper's own
-    `private` + `Vary` header when cacheable; force `no-store` when not."""
+    ``private`` + ``Vary`` header when cacheable; force ``no-store`` when not."""
     if not cacheable:
         resp.headers["Cache-Control"] = "private, no-store"
     return resp
 
 
-@router.get("/media/{stash_video_id}/stream.m3u8")
-async def serve_scene_m3u8(stash_video_id: int, request: Request = None):
+# ------------------------------------------------------------------
+# Canonical scene media: /media/{sqid}/...
+# ------------------------------------------------------------------
+@router.get("/media/{sqid}/stream.m3u8")
+async def serve_scene_m3u8(sqid: str, request: Request = None):
+    sid = _sqid_to_sid(sqid)
+    if sid is None:
+        raise HTTPException(status_code=404, detail="Video not found")
     try:
-        cacheable = await access.authorize_scene_media(request, stash_video_id)
-        m3u8_path = SHARES_DIR / f"{stash_video_id}.m3u8"
+        cacheable = await access.authorize_scene_media(request, sid)
+        m3u8_path = SHARES_DIR / f"{sqid}.m3u8"
         if not m3u8_path.exists():
-            logger.warning(f".m3u8 not found for scene {stash_video_id}, generating")
-            if not await media_proxy.generate_m3u8_file(str(stash_video_id), stash_video_id, DEFAULT_RESOLUTION):
+            logger.warning(f".m3u8 not found for sqid={sqid} (sid={sid}), generating")
+            if not await media_proxy.generate_m3u8_file(sqid, sid, DEFAULT_RESOLUTION):
                 raise HTTPException(status_code=500, detail="Failed to generate .m3u8 file")
         headers = dict(_M3U8_HEADERS)
         headers["Cache-Control"] = "public, max-age=10" if cacheable else "private, no-store"
@@ -122,12 +137,15 @@ async def serve_scene_m3u8(stash_video_id: int, request: Request = None):
         raise HTTPException(status_code=500, detail="Failed to serve .m3u8 file")
 
 
-@router.get("/media/{stash_video_id}/stream/{segment}", response_class=StreamingResponse)
-async def proxy_scene_segment(stash_video_id: int, segment: str, request: Request = None):
+@router.get("/media/{sqid}/stream/{segment}", response_class=StreamingResponse)
+async def proxy_scene_segment(sqid: str, segment: str, request: Request = None):
+    sid = _sqid_to_sid(sqid)
+    if sid is None:
+        raise HTTPException(status_code=404, detail="Video not found")
     try:
-        cacheable = await access.authorize_scene_media(request, stash_video_id)
+        cacheable = await access.authorize_scene_media(request, sid)
         return _apply_video_cache(
-            await media_proxy.stream_segment(stash_video_id, segment, DEFAULT_RESOLUTION), cacheable)
+            await media_proxy.stream_segment(sid, segment, DEFAULT_RESOLUTION), cacheable)
     except HTTPException:
         raise
     except Exception as e:
@@ -135,44 +153,62 @@ async def proxy_scene_segment(stash_video_id: int, segment: str, request: Reques
         raise HTTPException(status_code=500, detail="Failed to proxy HLS segment")
 
 
-@router.get("/media/{stash_video_id}/preview")
-async def proxy_scene_preview(stash_video_id: int, request: Request = None):
-    cacheable = await access.authorize_scene_media(request, stash_video_id)
-    return _apply_video_cache(await media_proxy.stream_simple_preview(stash_video_id), cacheable)
+@router.get("/media/{sqid}/preview")
+async def proxy_scene_preview(sqid: str, request: Request = None):
+    sid = _sqid_to_sid(sqid)
+    if sid is None:
+        raise HTTPException(status_code=404, detail="Video not found")
+    cacheable = await access.authorize_scene_media(request, sid)
+    return _apply_video_cache(await media_proxy.stream_simple_preview(sid), cacheable)
 
 
-@router.api_route("/media/{stash_video_id}/stream.mp4", methods=["GET", "HEAD"])
-async def serve_scene_mp4(stash_video_id: int, request: Request):
-    cacheable = await access.authorize_scene_media(request, stash_video_id)
-    return _apply_video_cache(await media_proxy.proxy_preview(stash_video_id, request), cacheable)
+@router.api_route("/media/{sqid}/stream.mp4", methods=["GET", "HEAD"])
+async def serve_scene_mp4(sqid: str, request: Request):
+    sid = _sqid_to_sid(sqid)
+    if sid is None:
+        raise HTTPException(status_code=404, detail="Video not found")
+    cacheable = await access.authorize_scene_media(request, sid)
+    return _apply_video_cache(await media_proxy.proxy_preview(sid, request), cacheable)
 
 
-@router.api_route("/media/{stash_video_id}/full.mp4", methods=["GET", "HEAD"])
-async def serve_scene_full_mp4(stash_video_id: int, request: Request):
-    cacheable = await access.authorize_scene_media(request, stash_video_id)
-    return _apply_video_cache(await media_proxy.proxy_full(stash_video_id, DEFAULT_RESOLUTION, request), cacheable)
+@router.api_route("/media/{sqid}/full.mp4", methods=["GET", "HEAD"])
+async def serve_scene_full_mp4(sqid: str, request: Request):
+    sid = _sqid_to_sid(sqid)
+    if sid is None:
+        raise HTTPException(status_code=404, detail="Video not found")
+    cacheable = await access.authorize_scene_media(request, sid)
+    return _apply_video_cache(await media_proxy.proxy_full(sid, DEFAULT_RESOLUTION, request), cacheable)
 
 
-@router.api_route("/media/{stash_video_id}/webp", methods=["GET", "HEAD"])
-async def serve_scene_webp(stash_video_id: int, request: Request):
-    cacheable = await access.authorize_scene_media(request, stash_video_id)
-    return _tighten_if_private(await media_proxy.proxy_webp(stash_video_id, request), cacheable)
+@router.api_route("/media/{sqid}/webp", methods=["GET", "HEAD"])
+async def serve_scene_webp(sqid: str, request: Request):
+    sid = _sqid_to_sid(sqid)
+    if sid is None:
+        raise HTTPException(status_code=404, detail="Video not found")
+    cacheable = await access.authorize_scene_media(request, sid)
+    return _tighten_if_private(await media_proxy.proxy_webp(sid, request), cacheable)
 
 
-@router.api_route("/media/{stash_video_id}/thumb", methods=["GET", "HEAD"])
-async def serve_scene_thumb(stash_video_id: int, request: Request):
-    cacheable = await access.authorize_scene_media(request, stash_video_id)
-    return _tighten_if_private(await media_proxy.proxy_thumb(stash_video_id, request), cacheable)
+@router.api_route("/media/{sqid}/thumb", methods=["GET", "HEAD"])
+async def serve_scene_thumb(sqid: str, request: Request):
+    sid = _sqid_to_sid(sqid)
+    if sid is None:
+        raise HTTPException(status_code=404, detail="Video not found")
+    cacheable = await access.authorize_scene_media(request, sid)
+    return _tighten_if_private(await media_proxy.proxy_thumb(sid, request), cacheable)
 
 
-@router.get("/media/{stash_video_id}/thumbnail.jpg")
-async def serve_scene_thumbnail(stash_video_id: int, request: Request = None, placeholder: bool = True):
-    # Cached screenshot served through the access gate (never a redirect to a
-    # public /static URL, which would sidestep the gate). The player passes
-    # ?placeholder=false so a missing screenshot leaves the player black instead
-    # of flashing the "No preview available" tile.
-    cacheable = await access.authorize_scene_media(request, stash_video_id)
-    thumbnail_path = await fetch_and_cache_thumbnail(str(stash_video_id), stash_video_id)
+@router.get("/media/{sqid}/thumbnail.jpg")
+async def serve_scene_thumbnail(sqid: str, request: Request = None, placeholder: bool = True):
+    """Cached screenshot served through the access gate (never a redirect to a
+    public /static URL, which would sidestep the gate). The player passes
+    ?placeholder=false so a missing screenshot leaves the player black instead
+    of flashing the "No preview available" tile."""
+    sid = _sqid_to_sid(sqid)
+    if sid is None:
+        raise HTTPException(status_code=404, detail="Video not found")
+    cacheable = await access.authorize_scene_media(request, sid)
+    thumbnail_path = await fetch_and_cache_thumbnail(str(sid), sid)
     if thumbnail_path:
         cc = "public, max-age=300" if cacheable else "private, no-store"
         return FileResponse(thumbnail_path, media_type="image/jpeg",
@@ -183,18 +219,74 @@ async def serve_scene_thumbnail(stash_video_id: int, request: Request = None, pl
 
 
 # ------------------------------------------------------------------
+# Legacy numeric /media/{id}/... → 301 to /media/{sqid}/...
+# (so any externally-shared numeric URLs carry forward)
+# ------------------------------------------------------------------
+@router.get("/media/{stash_video_id:int}/stream.m3u8")
+async def redirect_numeric_m3u8(stash_video_id: int, request: Request = None):
+    from sharestream.services.slugs import encode_video_id
+    sqid = encode_video_id(stash_video_id)
+    return RedirectResponse(url=f"/media/{sqid}/stream.m3u8", status_code=301)
+
+
+@router.get("/media/{stash_video_id:int}/stream/{segment}", response_class=StreamingResponse)
+async def redirect_numeric_segment(stash_video_id: int, segment: str, request: Request = None):
+    from sharestream.services.slugs import encode_video_id
+    sqid = encode_video_id(stash_video_id)
+    return RedirectResponse(url=f"/media/{sqid}/stream/{segment}", status_code=301)
+
+
+@router.get("/media/{stash_video_id:int}/preview")
+async def redirect_numeric_preview(stash_video_id: int, request: Request = None):
+    from sharestream.services.slugs import encode_video_id
+    sqid = encode_video_id(stash_video_id)
+    return RedirectResponse(url=f"/media/{sqid}/preview", status_code=301)
+
+
+@router.api_route("/media/{stash_video_id:int}/stream.mp4", methods=["GET", "HEAD"])
+async def redirect_numeric_mp4(stash_video_id: int, request: Request):
+    from sharestream.services.slugs import encode_video_id
+    sqid = encode_video_id(stash_video_id)
+    return RedirectResponse(url=f"/media/{sqid}/stream.mp4", status_code=301)
+
+
+@router.api_route("/media/{stash_video_id:int}/full.mp4", methods=["GET", "HEAD"])
+async def redirect_numeric_full(stash_video_id: int, request: Request):
+    from sharestream.services.slugs import encode_video_id
+    sqid = encode_video_id(stash_video_id)
+    return RedirectResponse(url=f"/media/{sqid}/full.mp4", status_code=301)
+
+
+@router.api_route("/media/{stash_video_id:int}/webp", methods=["GET", "HEAD"])
+async def redirect_numeric_webp(stash_video_id: int, request: Request):
+    from sharestream.services.slugs import encode_video_id
+    sqid = encode_video_id(stash_video_id)
+    return RedirectResponse(url=f"/media/{sqid}/webp", status_code=301)
+
+
+@router.api_route("/media/{stash_video_id:int}/thumb", methods=["GET", "HEAD"])
+async def redirect_numeric_thumb(stash_video_id: int, request: Request):
+    from sharestream.services.slugs import encode_video_id
+    sqid = encode_video_id(stash_video_id)
+    return RedirectResponse(url=f"/media/{sqid}/thumb", status_code=301)
+
+
+@router.get("/media/{stash_video_id:int}/thumbnail.jpg")
+async def redirect_numeric_thumbnail(stash_video_id: int, request: Request = None,
+                                     placeholder: bool = True):
+    from sharestream.services.slugs import encode_video_id
+    sqid = encode_video_id(stash_video_id)
+    suffix = "thumbnail.jpg" + ("" if placeholder else "?placeholder=false")
+    return RedirectResponse(url=f"/media/{sqid}/{suffix}", status_code=301)
+
+
+# ------------------------------------------------------------------
 # Collection (tag-share) social thumbnail — gallery-scoped, NOT a single scene.
 # Stays on its own route; unchanged.
 # ------------------------------------------------------------------
 @router.api_route("/tag/{share_id}/collection-thumb", methods=["GET", "HEAD"])
 async def serve_collection_thumb(share_id: str, request: Request):
-    """Negotiated social-embed thumbnail for a tag (collection) share.
-
-    Serves a shuffled montage animated WebP (merged member-video previews) to
-    WebP-capable clients, or a collage JPEG (grid of member screenshots) to
-    clients that need JPEG (Reddit, Embed.ly, Twitterbot) — same URL, chosen per
-    request like ``media_proxy.proxy_thumb``. Falls back to the site thumbnail
-    when the collection has no usable source media."""
+    """Negotiated social-embed thumbnail for a tag (collection) share."""
     with SessionLocal() as db:
         tag_share = access.authorize_tag_share(request, db, share_id)
         stash_tag_id = tag_share.stash_tag_id
@@ -202,15 +294,10 @@ async def serve_collection_thumb(share_id: str, request: Request):
         show_in_gallery = tag_share.show_in_gallery
         apply_limit_tag = tag_share.apply_limit_tag
 
-    # Mirror the share's own surfaces: a featured public share is always limited;
-    # a non-public share follows its operator's per-share apply_limit_tag choice.
     respect_limit = access.tag_share_respects_limit_tag(password_hash, show_in_gallery, apply_limit_tag)
     videos, _ = await get_videos_by_tag(stash_tag_id, respect_limit_tag=respect_limit)
     video_ids = [int(v["id"]) for v in videos]
 
-    # matrix-media-repo stores the WebP as a still, so hand it an animated GIF
-    # transcoded from the montage WebP. Falls through to WebP if the transcode
-    # is unavailable, rather than serving nothing.
     path = media_type = None
     if media_proxy._thumb_prefers_gif(request):
         path = await build_and_cache_collection_gif(share_id, video_ids)
@@ -225,7 +312,6 @@ async def serve_collection_thumb(share_id: str, request: Request):
             media_type = "image/webp"
 
     if not path:
-        # No usable member media (or compose failed): fall back to the site image.
         return RedirectResponse(url="/og/site-thumbnail", status_code=302)
 
     headers = {"Cache-Control": "private, max-age=300", "Vary": "Accept, User-Agent"}
@@ -235,7 +321,7 @@ async def serve_collection_thumb(share_id: str, request: Request):
 
 
 # ------------------------------------------------------------------
-# Legacy media shims → 301 to canonical /media/{id}/...
+# Legacy media shims → 301 to canonical /media/{sqid}/...
 # ------------------------------------------------------------------
 @router.get("/share/{share_id}/thumbnail.jpg")
 async def legacy_share_thumbnail(share_id: str, request: Request = None, placeholder: bool = True):

@@ -29,8 +29,14 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------
 async def generate_m3u8_file(share_id: str, stash_video_id: int, resolution: str) -> bool:
     """Fetch a scene's HLS playlist from Stash, rewrite its segment URLs to our
-    access-gated proxy route, and persist it to the private shares dir."""
+    access-gated /media/{sqid}/... proxy route, and persist it.
+
+    The rewritten segment URLs deliberately use the Hashid (Sqids encoding of
+    the Stash scene id), never the raw stash_video_id — otherwise the .m3u8
+    would expose the sequential id and defeat the unguessable-URL strategy."""
+    from sharestream.services.slugs import encode_video_id
     stash_url = stash.playlist_url(stash_video_id, resolution)
+    sqid = encode_video_id(stash_video_id)
     try:
         response = await http_client.get(stash_url)
         if response.status_code != 200:
@@ -50,14 +56,14 @@ async def generate_m3u8_file(share_id: str, stash_video_id: int, resolution: str
                 # Extract segment name (e.g., "0.ts") from any URL, ignoring query parameters
                 segment = line.split("/")[-1].split("?")[0]
                 # Segments are scene-keyed: rewrite to the canonical /media route
-                # (not the legacy /share shim) so playback never eats a redirect
-                # hop per segment, regardless of which caller's share_id labels
-                # the cached playlist file.
-                rewritten_lines.append(f"/media/{stash_video_id}/stream/{segment}")
+                # using the Hashid (not the raw stash id) so the playlist never
+                # leaks the sequential scene id.
+                rewritten_lines.append(f"/media/{sqid}/stream/{segment}")
             else:
                 rewritten_lines.append(line)
 
-        # Save rewritten .m3u8 file
+        # Save rewritten .m3u8 file (filename stays keyed to the caller's share_id,
+        # which is stable regardless of what labels the scene).
         m3u8_path = SHARES_DIR / f"{share_id}.m3u8"
         with open(m3u8_path, "w") as f:
             f.write("\n".join(rewritten_lines) + "\n")
