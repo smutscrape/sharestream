@@ -6,6 +6,8 @@
   Stash tag visibility governs: ``HIDDEN`` -> 404, ``PUBLIC``/``LISTED`` -> render,
   unlisted -> 404. A ``VideoOverride.password_hash`` is intentionally *not*
   checked here so a PUBLIC video plays freely in galleries without prompting.
+  Both ``/v/{sqid}`` and ``/v/{vanity_slug}`` render directly — no 301
+  canonicalisation redirect within /v/.
 
 * ``/{slug}`` — individual share URL (used when an admin generates a share
   with a custom slug and/or password). ``VideoOverride.password_hash`` governs
@@ -13,8 +15,10 @@
   via its share slug, since the slug itself is the capability).
 
 Both routes render the ``video-player.html`` template directly at their own URL.
-When a scene carries a ``VideoOverride.vanity_slug``, the /v/{sqid} form 301s
-to /v/{vanity_slug} so there is exactly one canonical global URL.
+The ``<link rel="canonical">`` and ``og:url`` always match the URL the viewer
+requested (no rewriting).  Media URLs always use the Sqids hashid, never the
+vanity slug or raw stash id, so ``/media/{sqid}/...`` is consistent regardless
+of which ``/v/`` form was used.
 """
 from __future__ import annotations
 
@@ -55,26 +59,20 @@ def _resolve_slug(db: Session, slug: str) -> tuple[int, VideoOverride | None] | 
     return None
 
 
-def _canonical_slug(stash_video_id: int, override: VideoOverride | None) -> str:
-    """The single canonical global slug for a scene: its vanity slug if set, else
-    the Sqids encoding."""
-    if override is not None and override.vanity_slug:
-        return override.vanity_slug
-    return encode_video_id(stash_video_id)
-
-
 # ---------------------------------------------------------------------------
 # Shared renderer for the video player template.
 # ---------------------------------------------------------------------------
 async def _render_video_page(request, db, stash_video_id, override, slug_for_context,
-                              verify_action_prefix="/v"):
+                              verify_action_prefix="/v", page_slug=None):
     """Build the ``video-player.html`` response for a scene cleared for playback.
 
     The template receives the Hashid slug (``hashid`` == vanity slug or Sqids
     encoding) — never the raw ``stash_video_id`` — so generated meta/embed/asset
     URLs are non-sequential. ``verify_action_prefix`` lets the /{slug} override
     route point the password form at its own endpoint (``/{slug}/verify``) instead
-    of ``/v/``."""
+    of ``/v/``.  ``page_slug`` is the slug that appears in the browser address bar;
+    it determines the canonical / og:url.  When omitted the canonical URL is
+    derived from ``slug_for_context`` and ``verify_action_prefix``."""
     video_details = await get_video_details(stash_video_id) or {}
     hit_count = get_total_plays(db, stash_video_id)
     hashid = slug_for_context
@@ -88,7 +86,13 @@ async def _render_video_page(request, db, stash_video_id, override, slug_for_con
     else:
         embed_video_url = f"{BASE_DOMAIN}{media_base}/stream.mp4"
 
-    canonical_url = f"{BASE_DOMAIN}/v/{slug_for_context if verify_action_prefix == '/v' else hashid}"
+    # Canonical URL = the URL the viewer is actually on.
+    # For /v/{slug} (global route) → /v/{slug}
+    # For /{slug} (individual share) → /{slug}
+    if page_slug is not None:
+        canonical_url = f"{BASE_DOMAIN}/{page_slug}"
+    else:
+        canonical_url = f"{BASE_DOMAIN}/v/{slug_for_context}"
     context = site_context(request)
     context.update(
         video_name=video_details.get("title") or "Video",
@@ -112,11 +116,9 @@ async def video_page(slug: str, request: Request = None, db: Session = Depends(g
         raise HTTPException(status_code=404, detail="Video not found")
     stash_video_id, override = resolved
 
-    # Canonicalize: when a vanity slug is set, the /v/{sqid} form 301s so that
-    # only the vanity URL is reachable globally.
-    canonical = _canonical_slug(stash_video_id, override)
-    if slug != canonical:
-        return RedirectResponse(url=f"/v/{canonical}", status_code=301)
+    # No canonicalisation redirect within /v/: both /v/{sqid} and
+    # /v/{vanity_slug} render directly.  The template canonical/og:url
+    # matches the URL the viewer actually requested.
 
     log_first_visit(request, f"v-{stash_video_id}", kind="video")
 
@@ -131,14 +133,12 @@ async def video_page(slug: str, request: Request = None, db: Session = Depends(g
     from sharestream.services.slugs import encode_video_id
     sqid = encode_video_id(stash_video_id)
 
-    if decision == access.ACCESS_PASSWORD_REQUIRED:
-        return access.password_prompt_if_locked(
-            request, str(stash_video_id), override.password_hash if override else None,
-            "Video", verify_action=f"/v/{slug}/verify",
-        )
+    # origin="global" never returns PASSWORD_REQUIRED: a PUBLIC/LISTED scene
+    # plays freely without prompting, and unlisted/hidden scenes are NOT_FOUND.
 
     return await _render_video_page(request, db, stash_video_id, override, sqid,
-                                    verify_action_prefix="/v")
+                                    verify_action_prefix="/v",
+                                    page_slug=f"v/{slug}")
 
 
 # ---------------------------------------------------------------------------
@@ -149,12 +149,11 @@ async def verify_video_password(slug: str, password: str = Form(...),
                                 next_url: str = Form(None, alias="next"),
                                 db: Session = Depends(get_db)):
     """Verify a password for the global /v/ scene route. On success, set the
-    scene-keyed unlock cookie and 303 back to the requested page (or /v/{canonical})."""
+    scene-keyed unlock cookie and 303 back to the requested page (or /v/{slug})."""
     resolved = _resolve_slug(db, slug)
     if resolved is None:
         raise HTTPException(status_code=404, detail="Video not found")
     stash_video_id, override = resolved
-    canonical = _canonical_slug(stash_video_id, override)
     safe_next = access.safe_next_path(next_url)
     password_hash = override.password_hash if override else None
     if not password_hash or not pwd_context.verify(password, password_hash):
@@ -167,7 +166,7 @@ async def verify_video_password(slug: str, password: str = Form(...),
             next_url=safe_next or "",
         )
         return HTMLResponse(html, status_code=401)
-    resp = RedirectResponse(safe_next or f"/v/{canonical}", status_code=303)
+    resp = RedirectResponse(safe_next or f"/v/{slug}", status_code=303)
     access.set_unlock_cookie(resp, str(stash_video_id))
     return resp
 

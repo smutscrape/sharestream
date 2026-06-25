@@ -25,6 +25,7 @@ from sharestream.db.session import get_db
 from sharestream.routers.pages import render_markdown_page
 from sharestream.routers.tags import tag_share_page
 from sharestream.services import access
+from sharestream.services.cache import is_video_in_tag
 from sharestream.services.slugs import canonical_video_slug
 
 router = APIRouter()
@@ -43,8 +44,8 @@ async def short_tag_video(tag: str, video_id: int, request: Request = None,
     respect_limit = access.tag_share_respects_limit_tag(tag_share.password_hash,
                                                         tag_share.show_in_gallery,
                                                         tag_share.apply_limit_tag)
-    if not await access.is_video_in_tag(tag_share.stash_tag_id, video_id,
-                                        respect_limit_tag=respect_limit):
+    if not await is_video_in_tag(tag_share.stash_tag_id, video_id,
+                                 respect_limit_tag=respect_limit):
         raise HTTPException(status_code=404, detail="Not found")
     slug = canonical_video_slug(db, video_id)
     resp = RedirectResponse(url=f"/v/{slug}", status_code=301)
@@ -124,8 +125,15 @@ async def _render_individual_share(request, db, override, slug):
             request, str(stash_video_id), override.password_hash,
             "Video", verify_action=f"/{slug}/verify",
         )
-    return await _render_video_page(request, db, stash_video_id, override, sqid,
-                                    verify_action_prefix="")
+    resp = await _render_video_page(request, db, stash_video_id, override, sqid,
+                                    verify_action_prefix="",
+                                    page_slug=slug)
+    # Always set the scene-keyed unlock cookie on ALLOW, even when there is no
+    # password.  This is what lets an unlisted capability URL (no password) fetch
+    # its own media subrequests — authorize_scene_media checks for this cookie
+    # regardless of ov_password.
+    access.set_unlock_cookie(resp, str(stash_video_id))
+    return resp
 
 
 @router.post("/{slug}/verify")

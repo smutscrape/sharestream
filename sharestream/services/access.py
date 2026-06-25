@@ -469,9 +469,11 @@ async def authorize_scene_media(request: Request, stash_video_id: int) -> bool:
         return not ov_password
 
     # Not publicly visible by stash tag. Check capability cookies:
-    # 2. Scene-keyed unlock cookie (set by the VideoOverride password flow).
-    if ov_password and media_access_ok(request, str(sid), ov_password):
-        return False  # allowed but private (don't CDN-cache password-gated bytes)
+    # 2. Scene-keyed unlock cookie.  Set by the VideoOverride password flow OR
+    #    by visiting an unlisted capability URL that has no password — either way
+    #    the browser has proven it can reach the share page, so media is allowed.
+    if has_valid_pw_cookie(request, str(sid)):
+        return False  # allowed but private (don't CDN-cache gated bytes)
 
     # 3. SharedTag (gated gallery) cookie: any active tag share whose cookie is
     #    valid for one of this scene's stash tags.
