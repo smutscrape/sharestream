@@ -87,10 +87,15 @@ async def _render_video_page(request, db, stash_video_id, override, slug_for_con
     _size = _files[0].get("size") if _files else None
     _duration = (video_details or {}).get("duration")
     media_base = f"/media/{hashid}"
+    # Append ?via=<share_id> to the embed video URL when this video is being
+    # rendered inside a gallery share — so og:video / twitter:player:stream
+    # carry the share context needed for media authorization (otherwise a
+    # non-public scene in a public gallery share would 403 for crawlers).
+    via_qs = f"?via={via_share_id}" if via_share_id else ""
     if should_embed_full(None, _duration, _size):
-        embed_video_url = f"{BASE_DOMAIN}{media_base}/full.mp4"
+        embed_video_url = f"{BASE_DOMAIN}{media_base}/full.mp4{via_qs}"
     else:
-        embed_video_url = f"{BASE_DOMAIN}{media_base}/stream.mp4"
+        embed_video_url = f"{BASE_DOMAIN}{media_base}/stream.mp4{via_qs}"
 
     # Canonical URL = the URL the viewer is actually on.
     # For /v/{slug} (global route) → /v/{slug}

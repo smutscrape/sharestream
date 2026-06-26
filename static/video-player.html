@@ -17,7 +17,7 @@
     {# Poster = the real Stash screenshot; ?placeholder=false makes a missing
        one 404 so the player stays black instead of showing the gallery
        "No preview available" tile. #}
-    {% set poster_url = media_base + '/thumbnail.jpg?placeholder=false' ~ via_qs %}
+    {% set poster_url = media_base + '/thumbnail.jpg?placeholder=false' ~ (via_qs | replace('?', '&') if via_qs else '') %}
 
     {# The server resolves whether to embed the full video or the preview clip
        (per-scene override, else the config default) and passes the URL. #}

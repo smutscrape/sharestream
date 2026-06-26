@@ -27,16 +27,24 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------
 # HLS playlist generation
 # ------------------------------------------------------------------
-async def generate_m3u8_file(share_id: str, stash_video_id: int, resolution: str) -> bool:
+async def generate_m3u8_file(share_id: str, stash_video_id: int, resolution: str,
+                              via_share_id: str | None = None) -> bool:
     """Fetch a scene's HLS playlist from Stash, rewrite its segment URLs to our
     access-gated /media/{sqid}/... proxy route, and persist it.
 
     The rewritten segment URLs deliberately use the Hashid (Sqids encoding of
     the Stash scene id), never the raw stash_video_id — otherwise the .m3u8
-    would expose the sequential id and defeat the unguessable-URL strategy."""
+    would expose the sequential id and defeat the unguessable-URL strategy.
+
+    ``via_share_id`` (optional) is the gallery share id when this playlist is
+    generated for a gallery-scoped video; it is appended as ?via=<share_id> to
+    each segment URL so segment requests carry the share context needed for
+    media authorization (the O(1) tag-share lookup). Without it, a password-
+    protected gallery share's segments fail auth."""
     from sharestream.services.slugs import encode_video_id
     stash_url = stash.playlist_url(stash_video_id, resolution)
     sqid = encode_video_id(stash_video_id)
+    via_suffix = f"?via={via_share_id}" if via_share_id else ""
     try:
         response = await http_client.get(stash_url)
         if response.status_code != 200:
@@ -57,8 +65,11 @@ async def generate_m3u8_file(share_id: str, stash_video_id: int, resolution: str
                 segment = line.split("/")[-1].split("?")[0]
                 # Segments are scene-keyed: rewrite to the canonical /media route
                 # using the Hashid (not the raw stash id) so the playlist never
-                # leaks the sequential scene id.
-                rewritten_lines.append(f"/media/{sqid}/stream/{segment}")
+                # leaks the sequential scene id. ?via= carries the gallery share
+                # context so segment requests authorize against this specific tag
+                # share (O(1) lookup) — without it, password-protected gallery
+                # shares fail auth on segment requests.
+                rewritten_lines.append(f"/media/{sqid}/stream/{segment}{via_suffix}")
             else:
                 rewritten_lines.append(line)
 

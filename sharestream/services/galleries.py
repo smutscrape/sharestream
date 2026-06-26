@@ -334,17 +334,38 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
                                                  tag_share.show_in_gallery,
                                                  tag_share.apply_limit_tag)
 
+    # Visibility filter for this surface. Hidden scenes are ALWAYS excluded
+    # from gallery listings (no surface shows them). Password-protected shares
+    # may include unlisted scenes; no-password shares may not.
+    is_locked = bool(tag_share.password_hash)
+    if is_locked:
+        # Password-protected share: include everything except hidden.
+        def _pass_visibility(v):
+            return v.get("_visibility") != "hidden"
+    else:
+        # No-password share: include only listed/public (and non-hidden).
+        def _pass_visibility(v):
+            return v.get("_visibility") in ("listed", "public")
+
     # Aggregate play counts per Stash scene (across every share context), so a
     # video's count matches the home page and its own video page. Populated once
     # the scene ids are known below.
     total_plays: dict[int, int] = {}
 
     if sort == 'random':
-        # Let Stash handle random sort, paginating via Stash.
+        # Let Stash handle random sort, paginating via Stash. We can't know
+        # which scenes will pass the visibility filter without fetching them all,
+        # so we filter the returned page and accept that random pagination is
+        # approximate (the total count may include scenes that would be
+        # excluded — this only affects the "Page N of M" display, not
+        # correctness of what's shown).
         _, total_count = await get_videos_by_tag(tag_share.stash_tag_id, per_page=1,
                                                  respect_limit_tag=respect_limit)  # get total count
         videos, _ = await get_videos_by_tag(tag_share.stash_tag_id, page=page, per_page=per_page,
                                             sort_by='random', respect_limit_tag=respect_limit)
+        # Apply visibility filter AFTER pagination so the random page reflects
+        # the same visibility rules the gallery uses.
+        videos = [v for v in videos if _pass_visibility(v)]
         total_plays = get_total_plays_map(db, [int(v["id"]) for v in videos])
     else:
         # Fetch all, then sort in Python and paginate. This keeps Title a
@@ -352,6 +373,9 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
         # fallback) — consistent with the home page.
         all_videos_raw = await get_all_videos_by_tag(tag_share.stash_tag_id,
                                                      respect_limit_tag=respect_limit)
+        # Apply visibility filter BEFORE pagination so page boundaries are
+        # correct (excluded scenes don't count toward the total).
+        all_videos_raw = [v for v in all_videos_raw if _pass_visibility(v)]
         # We just fetched the tag's COMPLETE contents — seed the membership cache
         # so this page's own (access-gated) thumbnail sub-requests hit it warm
         # instead of each re-probing Stash.
@@ -375,12 +399,19 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
     # first 20 screenshots concurrently (the rest lazy-load); either way the URL
     # is the access-gated route (so a protected tag's thumbnails stay behind its
     # password), never /static.
+    #
+    # Every media URL carries ?via=<share_id> so the /media/{sqid}/... routes
+    # authorize against this specific tag share (O(1) lookup) instead of
+    # requiring a scene-keyed cookie the gallery page never sets. Without this,
+    # password-protected gallery thumbnails/previews fail auth.
     slug_map = canonical_video_slugs(db, [int(v["id"]) for v in videos])
     video_cards = []
     warm_coros = []
     for i, video in enumerate(videos):
         vid = int(video["id"])
-        thumb_route = f"/media/{slug_map[vid]}/thumbnail.jpg"
+        sqid = slug_map.get(vid, str(vid))
+        thumb_route = f"/media/{sqid}/thumbnail.jpg?via={share_id}"
+        preview_route = f"/media/{sqid}/webp?via={share_id}"
         eager = i < 20
         if eager:
             warm_coros.append(fetch_and_cache_thumbnail(str(vid), vid))
@@ -388,8 +419,8 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
         video_cards.append({
             "video_name": video["title"],
             # Gallery-scoped video URL: /{gallery_slug}/{sqid}
-            "share_url": f"/{share_id}/{slug_map[vid]}",
-            "preview_url": f"/media/{slug_map.get(vid, vid)}/webp",
+            "share_url": f"/{share_id}/{sqid}",
+            "preview_url": preview_route,
             "thumbnail_url": thumb_route if eager else "/static/default_thumbnail.jpg",
             "lazy_thumbnail_url": thumb_route if not eager else None,
             "hits": total_plays.get(vid, 0),
@@ -437,7 +468,13 @@ async def build_tag_name_gallery_context(db: Session, tag_name: str, request=Non
     tag_id = tag_info["id"]
 
     # 2. Find all videos with this tag from Stash
-    target_videos_list = await get_all_videos_by_tag(tag_id)
+    all_videos_with_tag = await get_all_videos_by_tag(tag_id)
+    # Public /tag/{tag} gallery only shows listed/public scenes — never hidden,
+    # never unlisted. Hidden overrides everything.
+    target_videos_list = [
+        v for v in all_videos_with_tag
+        if v.get("_visibility") in ("listed", "public")
+    ]
     target_video_ids = {int(v['id']) for v in target_videos_list}
     # Runtime per scene (for the duration badge) from the same Stash payload.
     durations = {int(v['id']): v.get('duration') for v in target_videos_list}

@@ -122,10 +122,17 @@ async def serve_scene_m3u8(sqid: str, request: Request = None, via: str | None =
         raise HTTPException(status_code=404, detail="Video not found")
     try:
         cacheable = await access.authorize_scene_media(request, sid, via_share_id=via)
-        m3u8_path = SHARES_DIR / f"{sqid}.m3u8"
+        # Gallery-scoped playlists are keyed {via}-{sqid} so different scenes
+        # under the same share never collide in the cache (the old key,
+        # tag-{via}, was shared across all scenes in the share — so sceneB
+        # would get sceneA's cached playlist). Non-gallery playlists stay at
+        # {sqid}.m3u8.
+        m3u8_key = f"{via}-{sqid}" if via else sqid
+        m3u8_path = SHARES_DIR / f"{m3u8_key}.m3u8"
         if not m3u8_path.exists():
             logger.warning(f".m3u8 not found for sqid={sqid} (sid={sid}), generating")
-            if not await media_proxy.generate_m3u8_file(sqid, sid, DEFAULT_RESOLUTION):
+            if not await media_proxy.generate_m3u8_file(m3u8_key, sid, DEFAULT_RESOLUTION,
+                                                          via_share_id=via):
                 raise HTTPException(status_code=500, detail="Failed to generate .m3u8 file")
         headers = dict(_M3U8_HEADERS)
         headers["Cache-Control"] = "public, max-age=10" if cacheable else "private, no-store"

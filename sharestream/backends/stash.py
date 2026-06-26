@@ -44,6 +44,30 @@ def _visible_scene_tags(tags: list[dict]) -> list[dict]:
     ]
 
 
+# Visibility classification levels, ordered from most to least restrictive.
+# Used by callers that need to filter a listing by visibility.
+VISIBILITY_LEVELS = ("hidden", "unlisted", "listed", "public")
+
+
+def _classify_visibility(tags: list[dict]) -> str:
+    """Classify a scene's visibility from its raw Stash tags.
+
+    Uses the configured ``visibility_tags`` ids (public/listed/hidden) to
+    classify into one of: ``"hidden"``, ``"unlisted"``, ``"listed"``,
+    ``"public"``. Hidden overrides everything; if none of the configured tags
+    match, the scene is ``"unlisted"``.
+    """
+    tag_ids = {str(t.get("id")) for t in (tags or [])}
+    from sharestream.config import VISIBILITY_HIDDEN, VISIBILITY_LISTED, VISIBILITY_PUBLIC
+    if VISIBILITY_HIDDEN and str(VISIBILITY_HIDDEN) in tag_ids:
+        return "hidden"
+    if VISIBILITY_PUBLIC and str(VISIBILITY_PUBLIC) in tag_ids:
+        return "public"
+    if VISIBILITY_LISTED and str(VISIBILITY_LISTED) in tag_ids:
+        return "listed"
+    return "unlisted"
+
+
 # ------------------------------------------------------------------
 # Stash media URL builders
 # ------------------------------------------------------------------
@@ -319,6 +343,11 @@ async def get_videos_by_tag(tag_id: str, page: int = 1, per_page: int = 1000, so
         # Transform the data to a simpler format
         videos = []
         for scene in scenes:
+            raw_tags = scene.get("tags", [])
+            # Classify visibility from raw tags (before internal-tag filtering)
+            # so callers can filter listings by visibility without a second Stash
+            # call. Hidden always overrides.
+            visibility = _classify_visibility(raw_tags)
             video = {
                 "id": scene["id"],
                 "title": scene["title"],
@@ -330,7 +359,7 @@ async def get_videos_by_tag(tag_id: str, page: int = 1, per_page: int = 1000, so
                 "screenshot": scene["paths"]["screenshot"],
                 "preview": scene["paths"]["preview"],
                 "tags": [{"id": tag["id"], "name": tag["name"]}
-                         for tag in _visible_scene_tags(scene.get("tags", []))],
+                         for tag in _visible_scene_tags(raw_tags)],
                 "performers": [{"id": p["id"], "name": p["name"]} for p in scene.get("performers", [])],
                 "studio": scene.get("studio") if scene.get("studio") else None,
                 "resolution": (
@@ -338,6 +367,10 @@ async def get_videos_by_tag(tag_id: str, page: int = 1, per_page: int = 1000, so
                     if scene.get("files") and scene["files"][0].get("width") and scene["files"][0].get("height")
                     else None
                 ),
+                # Visibility classification from raw Stash tags. One of:
+                # "hidden", "unlisted", "listed", "public". Used by listing
+                # builders to decide which scenes a surface may show.
+                "_visibility": visibility,
             }
             videos.append(video)
 

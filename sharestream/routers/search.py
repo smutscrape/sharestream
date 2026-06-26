@@ -470,6 +470,15 @@ async def _search_in_gallery(
         tag_share.stash_tag_id, respect_limit_tag=respect_limit,
     )
 
+    # Apply the same visibility filter as the gallery page this search runs
+    # inside. Hidden scenes are always excluded. Password-protected shares may
+    # include unlisted scenes; no-password shares may not.
+    is_locked = bool(tag_share.password_hash)
+    if is_locked:
+        all_videos = [v for v in all_videos if v.get("_visibility") != "hidden"]
+    else:
+        all_videos = [v for v in all_videos if v.get("_visibility") in ("listed", "public")]
+
     # Apply text query filter (title or description)
     if query:
         all_videos = [v for v in all_videos if _match_query(v, query)]
@@ -510,14 +519,17 @@ async def _search_in_gallery(
     for v in all_videos:
         vid = int(v["id"])
         sqid = slug_map.get(vid, str(vid))
+        # Every media URL carries ?via=<share_id> so the /media/{sqid}/...
+        # routes authorize against this specific tag share (O(1) lookup) —
+        # without it, password-protected gallery search results fail auth.
         results.append({
             "stash_video_id": vid,
             "video_name": v.get("title") or "Untitled",
             "sqid": sqid,
             "share_url": f"/{share_id}/{sqid}",
-            "preview_url": f"/media/{sqid}/webp",
-            "thumbnail_url": f"/media/{sqid}/thumbnail.jpg",
-            "lazy_thumbnail_url": None,
+            "preview_url": f"/media/{sqid}/webp?via={share_id}",
+            "thumbnail_url": f"/media/{sqid}/thumbnail.jpg?via={share_id}",
+            "lazy_thumbnail_url": f"/media/{sqid}/thumbnail.jpg?via={share_id}",
             "hits": v.get("hits", 0),
             "duration": v.get("duration"),
             "duration_label": format_duration(v.get("duration")),
