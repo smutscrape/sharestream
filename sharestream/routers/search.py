@@ -73,6 +73,31 @@ _ENTITY_VOCAB_TTL = 600  # 10 minutes
 _ENTITY_TYPE_ORDER = {"performer": 0, "studio": 1, "tag": 2}
 
 
+def _parse_aliases(raw) -> list[str]:
+    """Normalize a Stash Tag.aliases value into a clean list of distinct,
+    non-empty alias strings.
+
+    Stash stores aliases as a scalar string — typically comma- or
+    newline-separated.  Accept a str, a list (in case the server ever returns
+    one), or None; ignore blanks, strip whitespace, drop duplicates, and
+    preserve first-seen order."""
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        parts = raw
+    else:
+        # Split on comma or newline, the two separators Stash uses.
+        parts = str(raw).replace("\n", ",").split(",")
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in parts:
+        a = p.strip()
+        if a and a not in seen:
+            seen.add(a)
+            out.append(a)
+    return out
+
+
 async def _fetch_and_update_cache(gallery_share_id: str, stash_tag_id: str):
     """Background task: fetch all tags, performers, and studios from Stash
     for a gallery's Stash tag scope and repopulate the entity cache."""
@@ -92,7 +117,7 @@ async def _fetch_and_update_cache(gallery_share_id: str, stash_tag_id: str):
             "query FindScenes($filter: FindFilterType, $scene_filter: SceneFilterType) {"
             "  findScenes(filter: $filter, scene_filter: $scene_filter) {"
             "    scenes {"
-            "      tags { id name }"
+            "      tags { id name aliases }"
             "      performers { id name }"
             "      studio { id name }"
             "    }"
@@ -118,13 +143,23 @@ async def _fetch_and_update_cache(gallery_share_id: str, stash_tag_id: str):
                     _ENTITY_VOCAB_CACHE[gallery_share_id]["updating"] = False
             return
 
-        tags_map: dict[str, str] = {}
+        tags_map: dict[str, dict] = {}
         performers_map: dict[str, str] = {}
         studios_map: dict[str, str] = {}
 
         for scene in (data.get("data") or {}).get("findScenes", {}).get("scenes", []):
             for tag in scene.get("tags", []):
-                tags_map[tag["id"]] = tag["name"]
+                name = tag.get("name")
+                # Skip internal/underscore tags (e.g. _public, _listed).
+                if not name or name.startswith("_"):
+                    continue
+                tags_map[tag["id"]] = {
+                    "name": name,
+                    # Stash's Tag.aliases is a scalar string (comma/newline
+                    # separated).  Normalize to a clean list of distinct,
+                    # non-empty aliases for matching/rendering.
+                    "aliases": _parse_aliases(tag.get("aliases")),
+                }
             for performer in scene.get("performers", []):
                 performers_map[performer["id"]] = performer["name"]
             studio = scene.get("studio")
@@ -137,8 +172,13 @@ async def _fetch_and_update_cache(gallery_share_id: str, stash_tag_id: str):
             entities.append({"type": "performer", "id": pid, "name": name})
         for sid, name in studios_map.items():
             entities.append({"type": "studio", "id": sid, "name": name})
-        for tid, name in tags_map.items():
-            entities.append({"type": "tag", "id": tid, "name": name})
+        for tid, data in tags_map.items():
+            entities.append({
+                "type": "tag",
+                "id": tid,
+                "name": data["name"],
+                "aliases": data["aliases"],
+            })
 
         # Sort by type order, then alphabetically within each group.
         entities.sort(
@@ -212,26 +252,92 @@ async def entity_autocomplete(
     if trigger_update:
         asyncio.create_task(_fetch_and_update_cache(gallery, tag_share.stash_tag_id))
 
-    # Filter the results by the query string.
+    # Filter + rank against the FULL cached vocabulary for this gallery.
+    #
+    # Ranking is tiered by MATCH QUALITY first (so results feel like
+    # autocomplete, not generic substring search), then by stable type grouping,
+    # then alphabetically.  Tiers, best to weakest:
+    #   0  name starts with the query        (prefix — strongest)
+    #   1  name contains the query mid-string (substring)
+    #   2  a tag alias contains the query     (fallback only)
+    # Quality dominates type: a prefix-matching tag outranks a substring-
+    # matching performer.  Within the same quality tier the existing type order
+    # (performer < studio < tag) is preserved, then alphabetical by name.
     q_lower = (q or "").strip().lower()
     all_entities = _ENTITY_VOCAB_CACHE.get(gallery, {}).get("data", [])
-    if q_lower:
-        matches = [e for e in all_entities if q_lower in e["name"].lower()]
-    else:
-        matches = list(all_entities)
 
-    return matches[:20]
+    if not q_lower:
+        # Blank query: return the full entity list (still cached).  The frontend
+        # no longer uses this as its candidate universe — it re-queries per
+        # keystroke — but a complete list keeps the endpoint useful for other
+        # callers and for the initial focus/prewarm path.
+        matches = list(all_entities)
+        return matches
+
+    prefix: list[dict] = []       # quality 0: name starts with query
+    substring: list[dict] = []    # quality 1: name contains query mid-string
+    alias_prefix: list[dict] = [] # quality 2: an alias starts with query
+    alias_sub: list[dict] = []    # quality 3: an alias contains query (weakest)
+
+    for e in all_entities:
+        name_lc = e["name"].lower()
+        if name_lc.startswith(q_lower):
+            prefix.append(e)
+            continue
+        if q_lower in name_lc:
+            substring.append(e)
+            continue
+        # Name didn't match — fall back to tag aliases (only tags have them).
+        # Among the matching aliases, prefer the strongest (prefix) and record
+        # the single best alias as matched_alias for rendering.
+        if e["type"] == "tag":
+            best_alias = None
+            best_is_prefix = False
+            for alias in e.get("aliases", []):
+                alias_lc = alias.lower()
+                if alias_lc.startswith(q_lower):
+                    best_alias = alias
+                    best_is_prefix = True
+                    break  # prefix is the strongest possible; stop early
+                if q_lower in alias_lc and best_alias is None:
+                    best_alias = alias
+                    # keep scanning — a later alias might be a prefix match
+            if best_alias is not None:
+                matched = dict(e)
+                matched["matched_alias"] = best_alias
+                if best_is_prefix:
+                    alias_prefix.append(matched)
+                else:
+                    alias_sub.append(matched)
+
+    # Sort each quality tier by (type_order, name) for stable type grouping.
+    def _tier_sort_key(e):
+        return (_ENTITY_TYPE_ORDER.get(e["type"], 3), e["name"].lower())
+
+    prefix.sort(key=_tier_sort_key)
+    substring.sort(key=_tier_sort_key)
+    alias_prefix.sort(key=_tier_sort_key)
+    alias_sub.sort(key=_tier_sort_key)
+
+    # Quality-first order: name-prefix, then name-substring, then
+    # alias-prefix, then alias-substring.  Weaker tiers are kept (not omitted)
+    # so they surface as fallback when stronger tiers are sparse.
+    matches = prefix + substring + alias_prefix + alias_sub
+
+    return matches[:30]
 
 
 # ---------------------------------------------------------------------------
 # Search endpoints
 # ---------------------------------------------------------------------------
 
-def _match_query(title: Optional[str], query: str) -> bool:
-    """True if the scene's title contains the query substring (case-insensitive)."""
-    if not title:
-        return False
-    return query.lower() in title.lower()
+def _match_query(video: dict, query: str) -> bool:
+    """True if the scene's title or description contains the query substring
+    (case-insensitive)."""
+    q = query.lower()
+    title = (video.get("title") or "").lower()
+    details = (video.get("details") or "").lower()
+    return q in title or q in details
 
 
 def _has_all_tags(video: dict, required_tag_ids: set[int]) -> bool:
@@ -240,16 +346,19 @@ def _has_all_tags(video: dict, required_tag_ids: set[int]) -> bool:
     return required_tag_ids.issubset(video_tag_ids)
 
 
-def _has_any_performer(video: dict, required_performer_ids: set[int]) -> bool:
-    """True if the video carries ANY of the required performer IDs (union)."""
+def _has_all_performers(video: dict, required_performer_ids: set[int]) -> bool:
+    """True if the video features ALL of the required performer IDs (intersection)."""
     if not required_performer_ids:
         return True
     video_performer_ids = {int(p["id"]) for p in video.get("performers", [])}
-    return bool(required_performer_ids & video_performer_ids)
+    return required_performer_ids.issubset(video_performer_ids)
 
 
-def _has_any_studio(video: dict, required_studio_ids: set[int]) -> bool:
-    """True if the video's studio is one of the required studio IDs (union)."""
+def _has_one_of_studios(video: dict, required_studio_ids: set[int]) -> bool:
+    """True if the video's studio is in the required studio set (union).
+
+    The frontend enforces that only one studio is selected at a time, but the
+    backend uses union so multiple IDs in the query still work if sent via API."""
     if not required_studio_ids:
         return True
     studio = video.get("studio")
@@ -361,21 +470,21 @@ async def _search_in_gallery(
         tag_share.stash_tag_id, respect_limit_tag=respect_limit,
     )
 
-    # Apply text query filter
+    # Apply text query filter (title or description)
     if query:
-        all_videos = [v for v in all_videos if _match_query(v.get("title"), query)]
+        all_videos = [v for v in all_videos if _match_query(v, query)]
 
     # Apply tag intersection filter
     if required_tag_ids:
         all_videos = [v for v in all_videos if _has_all_tags(v, required_tag_ids)]
 
-    # Apply performer union filter
+    # Apply performer intersection filter (ALL selected must be present)
     if required_performer_ids:
-        all_videos = [v for v in all_videos if _has_any_performer(v, required_performer_ids)]
+        all_videos = [v for v in all_videos if _has_all_performers(v, required_performer_ids)]
 
-    # Apply studio union filter
+    # Apply studio filter (frontend enforces single selection)
     if required_studio_ids:
-        all_videos = [v for v in all_videos if _has_any_studio(v, required_studio_ids)]
+        all_videos = [v for v in all_videos if _has_one_of_studios(v, required_studio_ids)]
 
     if not all_videos:
         return {
@@ -448,13 +557,13 @@ async def _search_global(
             vid = int(v["id"])
             if vid in seen:
                 continue
-            if query and not _match_query(v.get("title"), query):
+            if query and not _match_query(v, query):
                 continue
             if required_tag_ids and not _has_all_tags(v, required_tag_ids):
                 continue
-            if required_performer_ids and not _has_any_performer(v, required_performer_ids):
+            if required_performer_ids and not _has_all_performers(v, required_performer_ids):
                 continue
-            if required_studio_ids and not _has_any_studio(v, required_studio_ids):
+            if required_studio_ids and not _has_one_of_studios(v, required_studio_ids):
                 continue
             seen.add(vid)
             matched.append(v)

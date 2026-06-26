@@ -41,13 +41,13 @@
         {% if site_motto %}
         <div class="site-motto">{{ site_motto }}</div>
         {% endif %}
-        
+
         {% if tag_name %}
-        <h1>{{ tag_name }}{% if total_videos %} ({{ total_videos_label }} total){% endif %}</h1>
+        <h1><span id="gallery-header-text">{{ tag_name }}{% if total_videos %} ({{ total_videos_label }} total){% endif %}</span></h1>
         {% endif %}
 
         {% if collection_share_id %}
-        <!-- Faceted search bar: text query + tag picker + sort, only inside a curated Gallery -->
+        <!-- Faceted search bar: text query + entity picker + sort, only inside a curated Gallery -->
         <div class="faceted-search">
             <div class="faceted-search-bar" id="faceted-search-bar">
                 <svg class="faceted-search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -55,7 +55,7 @@
                     <path d="M16 16L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                 </svg>
                 <div class="faceted-tag-box" id="faceted-tag-box">
-                    <!-- Tag chips inserted here by JS -->
+                    <!-- Entity chips inserted here by JS -->
                     <input type="text" id="faceted-query-input"
                            placeholder="Search in this gallery..."
                            autocomplete="off"
@@ -69,7 +69,6 @@
                 </svg>
             </button>
         </div>
-        <div id="faceted-search-results" class="faceted-search-results"></div>
         {% endif %}
 
         <!-- Sort Dropdown -->
@@ -84,7 +83,7 @@
                 <option value="random" {% if sort == 'random' %}selected{% endif %}>Random</option>
             </select>
         </div>
-        
+
         <div class="gallery{% if gallery_mode %} gallery-masonry{% endif %}" id="gallery">
             {% for video in video_cards %}
             <div class="video-card" data-preview-url="{{ video.preview_url }}"{% if gallery_mode and video.aspect %} style="--card-aspect: {{ '%.4f'|format(video.aspect) }}"{% endif %}>
@@ -123,7 +122,7 @@
             </div>
             {% endfor %}
         </div>
-        
+
         {% if current_page %}
         <div class="pagination">
             {% if has_prev_page %}
@@ -135,9 +134,9 @@
             {% endif %}
         </div>
         {% endif %}
-        
+
         <div id="loading" style="display: none;">Loading more videos...</div>
-        
+
         {% if social_links %}
         <div class="social-links">
             {% for link in social_links %}
@@ -150,7 +149,7 @@
             {% endfor %}
         </div>
         {% endif %}
-        
+
         {% include "footer.html" %}
     </div>
 
@@ -158,58 +157,57 @@
     {% if collection_share_id %}
     <script>
     (function () {
-        // Faceted search: text query + entity chips (tags, performers, studios) + sort, scoped to this gallery.
+        // Reactive filter bar: directly filters the existing #gallery grid.
         var galleryId = {{ collection_share_id|tojson }};
         var queryInput = document.getElementById('faceted-query-input');
         var tagBox = document.getElementById('faceted-tag-box');
         var tagSuggestions = document.getElementById('faceted-tag-suggestions');
-        var resultsPanel = document.getElementById('faceted-search-results');
         var clearBtn = document.getElementById('faceted-clear-btn');
-        if (!queryInput || !tagBox || !tagSuggestions || !resultsPanel || !clearBtn) return;
+        var galleryGrid = document.getElementById('gallery');
+        var headerSpan = document.getElementById('gallery-header-text');
+        var paginationEl = document.querySelector('.pagination');
+        if (!queryInput || !tagBox || !tagSuggestions || !clearBtn || !galleryGrid || !headerSpan) return;
+
+        // Store original state for restoration on clear.
+        var originalHeaderText = headerSpan.textContent;
+        var originalGalleryHTML = galleryGrid.innerHTML;
+        // Derive gallery name from header (strip " (N total)" suffix).
+        var galleryName = originalHeaderText.replace(/\s*\(.*$/, '').trim() || {{ tag_name|tojson }} || 'Gallery';
 
         var activeEntities = [];  // [{id, name, type}]
         var activeIdx = -1;
         var debounceTimer = null;
-        var entityCache = null;  // [{type, id, name}]
+        var suggestReqId = 0;    // monotonic id to discard stale autocomplete responses
+        var isSearchActive = false;
 
         // ---- Pre-warm the stale-while-revalidate autocomplete cache ----
+        // This primes the SERVER-side cache so the first keystroke hits a warm
+        // cache. It is NOT used as the candidate universe.
         (function prewarmCache() {
-            fetch('/api/tags/autocomplete?q=a&gallery=' + encodeURIComponent(galleryId))
+            fetch('/api/tags/autocomplete?q=&gallery=' + encodeURIComponent(galleryId))
                 .then(function (r) { return r.json(); })
                 .catch(function () {});
         })();
 
-        // ---- Entity vocab: load once from /api/tags/autocomplete?gallery=<id> ----
-        function loadEntityVocab() {
-            if (entityCache) return Promise.resolve(entityCache);
-            return fetch('/api/tags/autocomplete?gallery=' + encodeURIComponent(galleryId))
-                .then(function (r) { return r.ok ? r.json() : []; })
-                .then(function (entities) { entityCache = entities || []; return entityCache; })
-                .catch(function () { entityCache = []; return entityCache; });
-        }
-
         // ---- Entity picker: matching / rendering / keyboard ----
+        // Autocomplete is now backend-driven: each keystroke queries the server,
+        // which filters against the FULL cached gallery vocabulary and returns
+        // the top matches.  We only exclude already-chosen entities locally.
         function currentMatches() {
-            var q = queryInput.value.trim().toLowerCase();
-            if (q.length < 2) return [];
+            var q = queryInput.value.trim();
+            if (q.length < 1) { closeSuggestions(); return; }  // trigger after 1 char
 
-            var chosen = new Set(activeEntities.map(function (e) { return e.type + ':' + e.id; }));
-            var vocab = entityCache || [];
-            var list = vocab.filter(function (e) { return !chosen.has(e.type + ':' + e.id); });
-
-            if (!q) {
-                return list.slice(0, 30);
-            }
-            var prefix = [], contains = [];
-            for (var i = 0; i < list.length; i++) {
-                var e = list[i];
-                var n = e.name.toLowerCase();
-                if (n.startsWith(q)) prefix.push(e);
-                else if (n.indexOf(q) >= 0) contains.push(e);
-            }
-            prefix.sort(function (a, b) { return a.name.localeCompare(b.name); });
-            contains.sort(function (a, b) { return a.name.localeCompare(b.name); });
-            return prefix.concat(contains).slice(0, 30);
+            var myReqId = ++suggestReqId;
+            fetch('/api/tags/autocomplete?q=' + encodeURIComponent(q) + '&gallery=' + encodeURIComponent(galleryId))
+                .then(function (r) { return r.ok ? r.json() : []; })
+                .then(function (entities) {
+                    if (myReqId !== suggestReqId) return;  // a newer keystroke superseded this
+                    renderSuggestions(entities || []);
+                })
+                .catch(function () {
+                    if (myReqId !== suggestReqId) return;
+                    closeSuggestions();
+                });
         }
 
         function entityPrefix(type) {
@@ -230,14 +228,20 @@
             return 'faceted-chip-tag';
         }
 
-        function renderSuggestions() {
-            var matches = currentMatches();
+        function renderSuggestions(entities) {
+            var chosen = new Set(activeEntities.map(function (e) { return e.type + ':' + e.id; }));
+            var matches = entities.filter(function (e) { return !chosen.has(e.type + ':' + e.id); });
             activeIdx = matches.length ? 0 : -1;
             if (!matches.length) { closeSuggestions(); return; }
             tagSuggestions.innerHTML = matches.map(function (e, i) {
                 var cls = 'faceted-tag-suggestion ' + entitySuggestionClass(e.type) + (i === activeIdx ? ' active' : '');
+                var nameHtml = escapeHtml(e.name);
+                // If alias matched, show parenthetical alias at 70% opacity.
+                if (e.matched_alias) {
+                    nameHtml += ' <span class="faceted-alias">' + escapeHtml(e.matched_alias) + '</span>';
+                }
                 return '<div class="' + cls + '" data-id="' + e.id + '" data-name="' + escapeHtml(e.name) + '" data-type="' + e.type + '">' +
-                    '<span class="faceted-suggestion-prefix">' + entityPrefix(e.type) + '</span>' + escapeHtml(e.name) +
+                    '<span class="faceted-suggestion-prefix">' + entityPrefix(e.type) + '</span>' + nameHtml +
                     '</div>';
             }).join('');
             tagSuggestions.querySelectorAll('.faceted-tag-suggestion').forEach(function (el) {
@@ -256,6 +260,10 @@
         }
 
         function addEntity(id, name, type) {
+            // Studio: enforce single selection (replace any existing studio).
+            if (type === 'studio') {
+                activeEntities = activeEntities.filter(function (e) { return e.type !== 'studio'; });
+            }
             if (activeEntities.some(function (e) { return e.id === id && e.type === type; })) return;
             activeEntities.push({ id: id, name: name, type: type });
             renderChips();
@@ -275,32 +283,22 @@
         }
 
         function renderChips() {
-            var html = '';
-            for (var i = 0; i < activeEntities.length; i++) {
-                var e = activeEntities[i];
-                html += '<span class="faceted-tag-chip ' + entityChipClass(e.type) + '" data-id="' + escapeHtml(e.id) + '" data-type="' + e.type + '">' +
-                    escapeHtml(e.name) + '<button type="button" class="faceted-tag-x" aria-label="Remove">&times;</button>' +
-                    '</span>';
-            }
-            // Remove old chips (keep the input element)
+            // Remove old chips (keep the input element).
             var chips = tagBox.querySelectorAll('.faceted-tag-chip');
             chips.forEach(function (c) { c.remove(); });
-            if (html) {
-                var span = document.createElement('span');
-                span.innerHTML = html;
-                var nodes = Array.from(span.childNodes);
-                for (var j = 0; j < nodes.length; j++) {
-                    tagBox.insertBefore(nodes[j], queryInput);
-                }
-            }
-            // Wire up remove handlers
-            tagBox.querySelectorAll('.faceted-tag-x').forEach(function (btn) {
-                btn.addEventListener('click', function (ev) {
+            for (var i = 0; i < activeEntities.length; i++) {
+                var e = activeEntities[i];
+                var chip = document.createElement('span');
+                chip.className = 'faceted-tag-chip ' + entityChipClass(e.type);
+                chip.dataset.id = e.id;
+                chip.dataset.type = e.type;
+                chip.innerHTML = escapeHtml(e.name) + '<button type="button" class="faceted-tag-x" aria-label="Remove">&times;</button>';
+                chip.querySelector('.faceted-tag-x').addEventListener('click', function (ev) {
                     ev.stopPropagation();
-                    var chip = ev.target.closest('.faceted-tag-chip');
-                    if (chip) removeEntity(chip.dataset.id, chip.dataset.type);
+                    removeEntity(e.id, e.type);
                 });
-            });
+                tagBox.insertBefore(chip, queryInput);
+            }
         }
 
         function highlightSuggestion() {
@@ -336,6 +334,10 @@
         }
 
         // ---- Search execution ----
+        function isFilterActive() {
+            return queryInput.value.trim() || activeEntities.length;
+        }
+
         function doSearch() {
             clearTimeout(debounceTimer);
             debounceTimer = setTimeout(executeSearch, 200);
@@ -343,15 +345,26 @@
 
         function executeSearch() {
             var q = queryInput.value.trim();
+            var active = isFilterActive();
+            isSearchActive = active;
+
+            // Hide pagination when a search/filter is active.
+            if (paginationEl) paginationEl.style.display = active ? 'none' : '';
+
+            if (!active) {
+                // Restore original gallery and header.
+                headerSpan.textContent = originalHeaderText;
+                restoreOriginalGallery();
+                return;
+            }
+
+            // Update header while searching.
+            headerSpan.textContent = 'Searching in ' + galleryName + '...';
+
             var tagIds = activeEntities.filter(function (e) { return e.type === 'tag'; }).map(function (e) { return e.id; }).join(',');
             var performerIds = activeEntities.filter(function (e) { return e.type === 'performer'; }).map(function (e) { return e.id; }).join(',');
             var studioIds = activeEntities.filter(function (e) { return e.type === 'studio'; }).map(function (e) { return e.id; }).join(',');
-            // If there's no query and no entities, clear results
-            if (!q && !tagIds && !performerIds && !studioIds) {
-                resultsPanel.innerHTML = '';
-                resultsPanel.classList.remove('has-results');
-                return;
-            }
+
             var params = new URLSearchParams();
             if (q) params.set('q', q);
             if (tagIds) params.set('tags', tagIds);
@@ -363,19 +376,66 @@
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
                     if (!data.results || !data.results.length) {
-                        resultsPanel.innerHTML = '<div class="faceted-search-empty">No matches found.</div>';
-                        resultsPanel.classList.add('has-results');
-                        return;
+                        galleryGrid.innerHTML = '<div class="faceted-search-empty">No matches found.</div>';
+                    } else {
+                        galleryGrid.innerHTML = data.results.map(renderCard).join('');
+                        wireHoverPreviews();
                     }
-                    var html = data.results.map(renderCard).join('');
-                    resultsPanel.innerHTML = html;
-                    resultsPanel.classList.add('has-results');
-                    wireHoverPreviews();
+                    // Update header with result count.
+                    var total = data.total != null ? data.total : (data.results ? data.results.length : 0);
+                    headerSpan.textContent = total + ' results in ' + galleryName;
+                    // Re-init masonry if active.
+                    if (galleryGrid.classList.contains('gallery-masonry')) {
+                        reinitMasonry();
+                    }
                 })
                 .catch(function () {
-                    resultsPanel.innerHTML = '<div class="faceted-search-empty">Search failed. Try again.</div>';
-                    resultsPanel.classList.add('has-results');
+                    galleryGrid.innerHTML = '<div class="faceted-search-empty">Search failed. Try again.</div>';
+                    headerSpan.textContent = 'Error — ' + galleryName;
                 });
+        }
+
+        function restoreOriginalGallery() {
+            galleryGrid.innerHTML = originalGalleryHTML;
+            wireHoverPreviews();
+            if (galleryGrid.classList.contains('gallery-masonry')) {
+                reinitMasonry();
+            }
+        }
+
+        // ---- Masonry re-initialization ----
+        // Replicates the packing logic from gallery-masonry.js so we can re-pack
+        // after replacing the gallery HTML.
+        function reinitMasonry() {
+            var GAP = 30;
+            var TARGET_COL = 340;
+            var cards = Array.from(galleryGrid.querySelectorAll('.video-card'));
+            if (!cards.length) return;
+            galleryGrid.innerHTML = '';
+            var cols = Math.max(1, Math.min(cards.length,
+                Math.floor((galleryGrid.clientWidth + GAP) / (TARGET_COL + GAP))));
+            var colEls = [];
+            var colHeights = [];
+            for (var i = 0; i < cols; i++) {
+                var col = document.createElement('div');
+                col.className = 'masonry-col';
+                galleryGrid.appendChild(col);
+                colEls.push(col);
+                colHeights.push(0);
+            }
+            cards.forEach(function (card) {
+                var shortest = 0;
+                for (var j = 1; j < cols; j++) {
+                    if (colHeights[j] < colHeights[shortest]) shortest = j;
+                }
+                colEls[shortest].appendChild(card);
+                // Approximate height: title (~40px) + thumbnail (colWidth / aspect).
+                var thumb = card.querySelector('.thumb');
+                var aspect = parseFloat(getComputedStyle(card).getPropertyValue('--card-aspect')) || 1.7778;
+                var colW = colEls[shortest].clientWidth || TARGET_COL;
+                var thumbH = thumb ? colW / aspect : 200;
+                colHeights[shortest] += thumbH + GAP + 40;
+            });
         }
 
         function renderCard(v) {
@@ -400,7 +460,9 @@
 
         function wireHoverPreviews() {
             var hoverTimers = new WeakMap();
-            resultsPanel.querySelectorAll('.video-card').forEach(function (card) {
+            document.querySelectorAll('.gallery .video-card').forEach(function (card) {
+                if (card._hoverWired) return;
+                card._hoverWired = true;
                 var previewUrl = card.getAttribute('data-preview-url');
                 var webp = card.querySelector('img.preview-webp');
                 if (!previewUrl || !webp) return;
@@ -428,8 +490,10 @@
             queryInput.value = '';
             activeEntities = [];
             tagBox.querySelectorAll('.faceted-tag-chip').forEach(function (c) { c.remove(); });
-            resultsPanel.innerHTML = '';
-            resultsPanel.classList.remove('has-results');
+            isSearchActive = false;
+            if (paginationEl) paginationEl.style.display = '';
+            headerSpan.textContent = originalHeaderText;
+            restoreOriginalGallery();
             updateClearBtn();
             closeSuggestions();
         });
@@ -438,7 +502,6 @@
         tagBox.addEventListener('click', function () { queryInput.focus(); });
         queryInput.addEventListener('focus', function () {
             tagBox.classList.add('focused');
-            loadEntityVocab();
         });
         queryInput.addEventListener('blur', function () {
             tagBox.classList.remove('focused');
@@ -446,17 +509,12 @@
         });
         queryInput.addEventListener('input', function () {
             updateClearBtn();
-            var val = queryInput.value.trim();
-            if (val.length >= 2) {
-                loadEntityVocab().then(renderSuggestions);
-            } else {
-                closeSuggestions();
-            }
+            currentMatches();  // backend-driven per keystroke against full vocab
             doSearch();
         });
         queryInput.addEventListener('keydown', onInputKey);
 
-        // Close suggestions when clicking outside
+        // Close suggestions when clicking outside.
         document.addEventListener('click', function (e) {
             if (!tagSuggestions.contains(e.target) && e.target !== queryInput) {
                 closeSuggestions();
@@ -509,7 +567,7 @@
 
             // Lazy loading for thumbnails
             const lazyImages = document.querySelectorAll('img.lazy-load');
-            
+
             if ('IntersectionObserver' in window) {
                 const imageObserver = new IntersectionObserver((entries, observer) => {
                     entries.forEach(entry => {
@@ -532,7 +590,7 @@
                     rootMargin: '50px 0px',
                     threshold: 0.01
                 });
-                
+
                 lazyImages.forEach(img => imageObserver.observe(img));
             } else {
                 // Fallback for browsers that don't support IntersectionObserver

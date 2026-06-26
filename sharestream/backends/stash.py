@@ -275,6 +275,7 @@ async def get_videos_by_tag(tag_id: str, page: int = 1, per_page: int = 1000, so
                         tags {
                             id
                             name
+                            aliases
                             __typename
                         }
                         performers {
