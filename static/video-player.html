@@ -6,9 +6,10 @@
     <title>{{ video_name or 'Video' }} - {{ site_name or 'Sharestream' }}</title>
     
     <!-- Open Graph / Social Media Meta Tags -->
-    {# All media is scene-keyed under /media/{stash_video_id}; the canonical page
-       URL (/v/{slug}, vanity or Sqids) is resolved server-side and passed in. #}
-    {% set media_base = '/media/' + stash_video_id|string %}
+    {# All media is scene-keyed under /media/{hashid}; the canonical page
+       URL (/v/{slug}, vanity or Sqids) is resolved server-side and passed in.
+       We NEVER expose the raw stash_video_id in any URL or meta tag. #}
+    {% set media_base = '/media/' + hashid|string %}
     {% set page_url  = canonical_url %}
     {% set video_url = base_domain + media_base + '/stream.mp4' %}
     {% set image_url = base_domain + media_base + '/thumb' %}
@@ -24,8 +25,8 @@
     {% endif %}
 
     {# Bare player page (no site chrome) for iframe embeds, e.g. Mastodon's
-       twitter:player, keyed to the scene id. #}
-    {% set embed_url = base_domain + '/embed/' + stash_video_id|string %}
+       twitter:player, keyed to the Hashid (never the sequential stash id). #}
+    {% set embed_url = base_domain + '/embed/' + hashid|string %}
 
     {# Try to parse "WxH" from video_details.resolution; fall back to 1280x720 #}
     {% set og_w = 1280 %}
