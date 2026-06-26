@@ -1,10 +1,3 @@
-
-
-
-Good feedback. Here's the revised README:
-
----
-
 ![Logo Placeholder](https://codeberg.org/sharestream/sharestream/raw/branch/main/static/sharestream.svg)
 
 # Sharestream
@@ -14,11 +7,6 @@ Good feedback. Here's the revised README:
 Built with FastAPI, Sharestream sits in front of your media server and exposes only what you choose to share — your library credentials never leave the server, and only the items you explicitly publish are reachable.
 
 > **Backend support:** Sharestream currently integrates with [Stash](https://stashapp.cc). **Jellyfin support is planned for the near term**, and the codebase has been refactored toward a backend‑neutral design to make additional sources straightforward.
-
-> **Live instances:**
-> - **SFW demo:** [demo.silent.surf](https://demo.silent.surf) — uptime not guaranteed, may be reset at any time
-> - **NSFW production example:** [homeschool.porn](https://homeschool.porn) — kinky taboo porn captions, very not safe for work
-
 
 ## Highlights
 
@@ -281,3 +269,6 @@ Access the admin panel at `https://yourdomain/__admin`.
 - **Capability URLs**: shares are reached via unguessable tokens (or your chosen custom slug), never by raw source IDs. Global `/v/{sqid}` URLs use Sqids with an optional randomized alphabet so scene IDs are non‑sequential and unguessable.
 - **Scene visibility model**: config‑driven public / listed / unlisted / hidden tiers via Stash tags. Public
 
+> **Live instances:**
+> - **SFW demo:** [demo.silent.surf](https://demo.silent.surf) — uptime not guaranteed, may be reset at any time
+> - **NSFW production example:** [homeschool.porn](https://homeschool.porn) — kinky taboo porn captions, very not safe for work
