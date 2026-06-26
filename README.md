@@ -269,6 +269,8 @@ Access the admin panel at `https://yourdomain/__admin`.
 - **Capability URLs**: shares are reached via unguessable tokens (or your chosen custom slug), never by raw source IDs. Global `/v/{sqid}` URLs use Sqids with an optional randomized alphabet so scene IDs are non‑sequential and unguessable.
 - **Scene visibility model**: config‑driven public / listed / unlisted / hidden tiers via Stash tags. Public
 
-> **Live instances:**
+## **Live instances:**
+
 > - **SFW demo:** [demo.silent.surf](https://demo.silent.surf) — uptime not guaranteed, may be reset at any time
-> - **NSFW production example:** [homeschool.porn](https://homeschool.porn) — kinky taboo porn captions, very not safe for work
+
+> - **NSFW production example:** [homeschool.porn](https://homeschool.porn) — kinky taboo caption videos — _**very not safe for work!**_
