@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ video_name or 'Video' }}</title>
-    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
+    <link href="{{ asset('static/video-js/video-js.css') }}" rel="stylesheet">
     <link href="{{ asset('static/video-player.css') }}" rel="stylesheet">
     <style>
         html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
@@ -12,6 +12,7 @@
         .video-js { width: 100% !important; height: 100% !important; border-radius: 0; }
         .video-js .vjs-tech { object-fit: contain; }
     </style>
+    {{ head_html | safe }}
 </head>
 <body>
     <div class="embed-stage">
@@ -20,8 +21,11 @@
             Your browser does not support the video tag.
         </video>
     </div>
-    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+    <script src="{{ asset('static/video-js/video.min.js') }}"></script>
     <script>
+        if (typeof window.videojs !== 'function') {
+            console.warn('Video.js failed to load; embed will use native browser controls.');
+        } else {
         var params = new URLSearchParams(location.search);
         // Embedders (Mastodon, etc.) append ?autoplay=1 / ?auto_play=1 when the
         // viewer clicks play. Browsers only allow autoplay when muted, so start
@@ -47,6 +51,7 @@
                 if (p && p.catch) { p.catch(function () {}); }
             });
         }
+        } // end: videojs guard
     </script>
 </body>
 </html>

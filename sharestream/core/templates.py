@@ -11,6 +11,7 @@ from urllib.parse import quote_plus
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from sharestream.config import HEAD_HTML
 from sharestream.services.markdown import render_markdown
 
 JINJA_ENV = Environment(
@@ -19,7 +20,6 @@ JINJA_ENV = Environment(
 )
 JINJA_ENV.filters['urlencode'] = quote_plus
 JINJA_ENV.filters['markdown'] = render_markdown
-
 
 def asset(path: str) -> str:
     """Cache-busting URL for a static file: ``asset('static/styles.css')`` ->
@@ -33,12 +33,11 @@ def asset(path: str) -> str:
     except OSError:
         return f"/{rel}"
 
-
 JINJA_ENV.globals['asset'] = asset
+JINJA_ENV.globals['head_html'] = HEAD_HTML
 
 # Backwards-compatible accessor: TEMPLATES("file.html") -> Template
 TEMPLATES = JINJA_ENV.get_template
-
 
 def render(template_name: str, **context) -> str:
     """Render ``template_name`` from the static template dir with ``context``."""

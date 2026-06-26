@@ -25,6 +25,7 @@
     <link rel="icon" href="/favicon.ico" sizes="any">
     <link rel="icon" type="image/png" href="/favicon.png">
     <link rel="apple-touch-icon" href="/favicon.png">
+    {{ head_html | safe }}
 </head>
 <body{% if show_content_warning %} class="cw-locked"{% endif %}>
     {% include "content-warning.html" %}

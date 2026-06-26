@@ -87,6 +87,11 @@ SITE_THUMBNAIL = config.get('site_thumbnail') or ''
 # Human-readable site description for og:description on the home page (and the
 # fallback description for static pages with no body text).
 SITE_DESCRIPTION = config.get('site_description', '') or ''
+# Free-form HTML injected into every page's <head> by the
+# HeadHtmlInjectionMiddleware (e.g. third-party analytics, verification meta
+# tags). Empty/unset disables injection. Content is trusted — the operator
+# controls config.yaml.
+HEAD_HTML = (config.get('head_html') or '').strip()
 SOCIAL_LINKS = config.get('social_links', [])  # Add social_links with empty list default
 FOOTER = parse_footer_config(config)
 # Optional content warning / age-gate shown to first-time visitors on the home

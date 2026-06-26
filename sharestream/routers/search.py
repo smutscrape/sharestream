@@ -512,7 +512,7 @@ async def _search_in_gallery(
 
     sort_video_dicts(all_videos, sort)
 
-    all_videos = all_videos[:200]
+    all_videos = all_videos[:500]
 
     slug_map = canonical_video_slugs(db, [int(v["id"]) for v in all_videos])
     results = []

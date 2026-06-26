@@ -54,9 +54,12 @@
     <meta property="og:video:width"        content="{{ og_w }}">
     <meta property="og:video:height"       content="{{ og_h }}">
     {% if video_details and video_details.details %}
+    <meta name="description"              content="{{ video_details.details[:200] }}">
     <meta property="og:description"        content="{{ video_details.details[:200] }}">
     {% else %}
-    <meta property="og:description"        content="Watch this video on {{ site_name or 'Sharestream' }}">
+    {% set _watch_fallback = 'Watch this video on ' ~ (site_name or 'Sharestream') %}
+    <meta name="description"              content="{{ _watch_fallback }}">
+    <meta property="og:description"        content="{{ _watch_fallback }}">
     {% endif %}
 
     {# Player Card: attempts an inline video player on X. Per X's official staff
@@ -112,10 +115,11 @@
     <link rel="icon" href="/favicon.ico" sizes="any">
     <link rel="icon" type="image/png" href="/favicon.png">
     <link rel="apple-touch-icon" href="/favicon.png">
-    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet">
+    <link href="{{ asset('static/video-js/video-js.css') }}" rel="stylesheet">
     <link href="{{ asset('static/video-player.css') }}" rel="stylesheet">
     <script src="{{ asset('static/emoji-fix.js') }}" defer></script>
     <script src="{{ asset('static/metadata-masonry.js') }}" defer></script>
+    {{ head_html | safe }}
 </head>
 <body{% if show_content_warning %} class="cw-locked"{% endif %}>
     {% include "content-warning.html" %}
@@ -304,8 +308,16 @@
         
         {% include "footer.html" %}
     </div>
-    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+    <script src="{{ asset('static/video-js/video.min.js') }}"></script>
     <script>
+        // Guard: if the Video.js library failed to load (network blocked, CDN
+        // unreachable, crawler that strips external scripts, etc.) the page
+        // must still render and the rest of the JS must keep running. Without
+        // this check, `videojs` being undefined here throws a ReferenceError
+        // that aborts the entire script block.
+        if (typeof window.videojs !== 'function') {
+            console.warn('Video.js failed to load; player will use the native browser controls.');
+        } else {
         // Skip buttons. video.js 8 removed videojs.extend, so we subclass the
         // Button component directly and register the components BEFORE the
         // player is created so they exist when the control bar is built.
@@ -399,7 +411,20 @@
         ['loadstart', 'loadedmetadata', 'loadeddata', 'canplay', 'playing', 'durationchange']
             .forEach(function (ev) { player.on(ev, fitVideoToViewport); });
         window.addEventListener('resize', fitVideoToViewport);
+        } // end: videojs guard
     </script>
-
+<script>
+  fetch('{{ asset("static/localized/video-tracking.js") }}', { method: 'HEAD' })
+    .then(response => {
+      if (response.ok) {
+        var script = document.createElement('script');
+        script.src = '{{ asset("static/localized/video-tracking.js") }}';
+        document.body.appendChild(script);
+      }
+    })
+    .catch(() => {
+      // File doesn't exist, tracking disabled — that's fine
+    });
+</script>
 </body>
 </html>
