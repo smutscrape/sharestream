@@ -12,10 +12,12 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from starlette.responses import Response
+from starlette.responses import FileResponse, Response
 
 from sharestream.config import LIMIT_TO_TAG
 from sharestream.core.errors import register_error_handlers
@@ -30,6 +32,7 @@ from sharestream.routers import (
     media,
     pages,
     public,
+    search,
     shares,
     short_urls,
     site,
@@ -73,6 +76,14 @@ def create_app() -> FastAPI:
     # Static assets
     app.mount("/static", ImmutableStaticFiles(directory="static"), name="static")
 
+    # robots.txt — served at the site root so crawlers can find it.
+    _robots_path = Path(__file__).parent.parent / "robots.txt"
+    @app.get("/robots.txt", include_in_schema=False)
+    async def robots_txt():
+        if _robots_path.exists():
+            return FileResponse(_robots_path, media_type="text/plain")
+        return Response("User-agent: *\nAllow: /\n", media_type="text/plain")
+
     # Error handling
     register_error_handlers(app)
 
@@ -102,6 +113,7 @@ def create_app() -> FastAPI:
     app.include_router(filedrop.router)
     app.include_router(pages.router)
     app.include_router(public.router)
+    app.include_router(search.router)
     app.include_router(short_urls.router)  # MUST be included last
 
     return app

@@ -26,9 +26,87 @@ from sharestream.routers.pages import render_markdown_page
 from sharestream.routers.tags import tag_share_page
 from sharestream.services import access
 from sharestream.services.cache import is_video_in_tag
-from sharestream.services.slugs import canonical_video_slug
+from sharestream.services.slugs import canonical_video_slug, decode_video_id, encode_video_id
 
 router = APIRouter()
+
+
+@router.get("/{tag_share_id}/{sqid}", response_class=HTMLResponse, response_model=None)
+async def gallery_scoped_video(tag_share_id: str, sqid: str, request: Request = None,
+                               db: Session = Depends(get_db)):
+    """Render video player scoped to a curated Gallery.
+
+    URL: ``/{gallery_slug}/{sqid}``.  Access is validated against that specific
+    gallery's password/expiry and video membership.  Media URLs in the player
+    template append ``?via=<gallery_share_id>`` so the O(1) media authorization
+    path is used (no O(N) tag-share scan).
+
+    MUST be registered BEFORE the catch-all ``/{slug}`` route below."""
+    # 1. Validate Sqid
+    sid = decode_video_id(sqid)
+    if sid is None:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    # 2. Validate Tag Share
+    tag_share = db.query(SharedTag).filter(SharedTag.share_id == tag_share_id).first()
+    if not tag_share:
+        raise HTTPException(status_code=404, detail="Gallery not found")
+
+    # 3. Enforce Access (Expiry, Password, Membership)
+    access.ensure_not_expired(tag_share.expires_at, "Gallery has expired")
+
+    locked = access.password_prompt_if_locked(request, tag_share.share_id,
+                                              tag_share.password_hash,
+                                              f"Gallery: {tag_share.tag_name}",
+                                              verify_action=f"/{tag_share_id}/{sqid}/verify")
+    if locked is not None:
+        return locked
+
+    respect_limit = access.tag_share_respects_limit_tag(tag_share.password_hash,
+                                                       tag_share.show_in_gallery,
+                                                       tag_share.apply_limit_tag)
+    if not await is_video_in_tag(tag_share.stash_tag_id, sid,
+                                 respect_limit_tag=respect_limit):
+        raise HTTPException(status_code=404, detail="Video not found in this gallery")
+
+    # 4. Render Player (gallery context so media URLs use ?via=)
+    from sharestream.routers.video import _render_video_page
+    return await _render_video_page(
+        request, db, sid, None, sqid,
+        verify_action_prefix=f"/{tag_share_id}",
+        page_slug=f"{tag_share_id}/{sqid}",
+        via_share_id=tag_share_id,
+    )
+
+
+@router.post("/{tag_share_id}/{sqid}/verify")
+async def verify_gallery_video_password(tag_share_id: str, sqid: str,
+                                       password: str = Form(...),
+                                       next_url: str = Form(None, alias="next"),
+                                       request: Request = None,
+                                       db: Session = Depends(get_db)):
+    """Verify a password for the gallery-scoped video route
+    ``/{gallery_slug}/{sqid}``. On success, set the tag-share's unlock cookie
+    and 303 back to the page."""
+    tag_share = db.query(SharedTag).filter(SharedTag.share_id == tag_share_id).first()
+    if tag_share is None:
+        raise HTTPException(status_code=404, detail="Gallery not found")
+    safe_next = access.safe_next_path(next_url)
+    if not tag_share.password_hash or not pwd_context.verify(password, tag_share.password_hash):
+        from sharestream.core.branding import site_context
+        html = render(
+            "password-prompt.html",
+            **site_context(request),
+            video_name=f"Gallery: {tag_share.tag_name}",
+            share_id=tag_share_id,
+            error_message="Incorrect password. Please try again.",
+            next_url=safe_next or "",
+            verify_action=f"/{tag_share_id}/{sqid}/verify",
+        )
+        return HTMLResponse(html, status_code=401)
+    resp = RedirectResponse(safe_next or f"/{tag_share_id}/{sqid}", status_code=303)
+    access.set_unlock_cookie(resp, tag_share_id)
+    return resp
 
 
 @router.get("/{tag}/{video_id:int}", response_class=HTMLResponse, response_model=None)

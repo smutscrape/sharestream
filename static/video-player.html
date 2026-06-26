@@ -10,13 +10,14 @@
        URL (/v/{slug}, vanity or Sqids) is resolved server-side and passed in.
        We NEVER expose the raw stash_video_id in any URL or meta tag. #}
     {% set media_base = '/media/' + hashid|string %}
+    {% set via_qs = ('?via=' ~ via_share_id) if via_share_id else '' %}
     {% set page_url  = canonical_url %}
-    {% set video_url = base_domain + media_base + '/stream.mp4' %}
-    {% set image_url = base_domain + media_base + '/thumb' %}
+    {% set video_url = base_domain + media_base + '/stream.mp4' ~ via_qs %}
+    {% set image_url = base_domain + media_base + '/thumb' ~ via_qs %}
     {# Poster = the real Stash screenshot; ?placeholder=false makes a missing
        one 404 so the player stays black instead of showing the gallery
        "No preview available" tile. #}
-    {% set poster_url = media_base + '/thumbnail.jpg?placeholder=false' %}
+    {% set poster_url = media_base + '/thumbnail.jpg?placeholder=false' ~ via_qs %}
 
     {# The server resolves whether to embed the full video or the preview clip
        (per-scene override, else the config default) and passes the URL. #}
@@ -73,6 +74,39 @@
     <meta name="twitter:player:height"     content="{{ og_h }}">
     <meta name="twitter:image"             content="{{ image_url }}">
 
+    {# Google Video SEO: Schema.org VideoObject structured data #}
+    {% set is_public = not via_share_id %}
+    {% if video_details and video_details.duration %}
+        {% set total_seconds = video_details.duration | round | int %}
+        {% set hours = (total_seconds // 3600) %}
+        {% set minutes = ((total_seconds % 3600) // 60) %}
+        {% set seconds = (total_seconds % 60) %}
+        {% if hours > 0 %}
+            {% set iso_duration = 'PT' ~ hours ~ 'H' ~ minutes ~ 'M' ~ seconds ~ 'S' %}
+        {% else %}
+            {% set iso_duration = 'PT' ~ minutes ~ 'M' ~ seconds ~ 'S' %}
+        {% endif %}
+    {% else %}
+        {% set iso_duration = 'PT0S' %}
+    {% endif %}
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "VideoObject",
+      "name": "{{ video_name or 'Video' }}",
+      "description": "{{ (video_details.details[:200] if video_details and video_details.details else 'Watch this video on ' ~ (site_name or 'Sharestream')) | replace('"', '\\"') }}",
+      "thumbnailUrl": "{{ image_url }}",
+      "uploadDate": "{{ video_details.date if video_details and video_details.date else '2024-01-01T00:00:00+00:00' }}",
+      "duration": "{{ iso_duration }}"
+      {% if is_public %}
+      ,
+      "contentUrl": "{{ base_domain }}{{ media_base }}/stream.mp4",
+      "embedUrl": "{{ base_domain }}/embed/{{ hashid }}"
+      {% endif %}
+    }
+    </script>
+
     <link href="{{ asset('static/styles.css') }}" rel="stylesheet">
     <link href="/fonts.css" rel="stylesheet">
     <link rel="icon" href="/favicon.ico" sizes="any">
@@ -98,7 +132,7 @@
         <div class="video-stage">
         <div class="video-container" id="video-box" data-arw="{{ og_w }}" data-arh="{{ og_h }}">
             <video id="video-player" class="video-js vjs-default-skin" controls preload="auto" poster="{{ poster_url }}" playsinline loop>
-                <source src="{{ media_base }}/stream.m3u8" type="application/x-mpegURL">
+                <source src="{{ media_base }}/stream.m3u8{{ via_qs }}" type="application/x-mpegURL">
                 Your browser does not support the video tag.
             </video>
         </div>

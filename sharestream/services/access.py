@@ -421,7 +421,8 @@ async def resolve_scene_access(request: Request, db: Session, stash_video_id: in
     return ACCESS_ALLOW
 
 
-async def authorize_scene_media(request: Request, stash_video_id: int) -> bool:
+async def authorize_scene_media(request: Request, stash_video_id: int,
+                               via_share_id: str | None = None) -> bool:
     """Gate a media sub-request keyed to a Stash scene id (the /media/{id}/...
     routes) and RETURN whether the media is publicly cacheable. Raises 404
     (hidden/expired) or 403 ("Password required") to follow the media-route
@@ -432,8 +433,9 @@ async def authorize_scene_media(request: Request, stash_video_id: int) -> bool:
       1. scene carries PUBLIC / LISTED stash tags → ALLOW (public-cacheable).
       2. request carries a valid scene-keyed unlock cookie (set by the
          /{slug} VideoOverride password flow) → ALLOW.
-      3. request carries a valid unlock cookie for a SharedTag (gated
-         gallery) that contains this scene → ALLOW.
+      3. ``via_share_id`` is provided (gallery-scoped route ``/{gallery}/{sqid}``):
+         O(1) lookup of that specific SharedTag; if the request carries its
+         unlock cookie and the scene is a member → ALLOW.
     Otherwise → 403.
 
     Returns ``True`` only for public/listed scenes with no password — those bytes
@@ -475,18 +477,19 @@ async def authorize_scene_media(request: Request, stash_video_id: int) -> bool:
     if has_valid_pw_cookie(request, str(sid)):
         return False  # allowed but private (don't CDN-cache gated bytes)
 
-    # 3. SharedTag (gated gallery) cookie: any active tag share whose cookie is
-    #    valid for one of this scene's stash tags.
-    with SessionLocal() as db:
-        active_tag_shares = db.query(SharedTag).filter(
-            SharedTag.password_hash.isnot(None),
-        ).all()
-    scene_tag_ids = {str(t) for t in tag_ids}
-    for tag_share in active_tag_shares:
-        if tag_share.stash_tag_id not in scene_tag_ids:
-            continue
-        if has_valid_pw_cookie(request, tag_share.share_id):
-            return False  # allowed but private
+    # 3. Gallery-scoped unlock: the caller (gallery-scoped video route) supplies
+    #    the exact share_id via ?via=. O(1) lookup — no scan of all tag shares.
+    if via_share_id:
+        with SessionLocal() as db:
+            tag_share = db.query(SharedTag).filter(SharedTag.share_id == via_share_id).first()
+        if tag_share and tag_share.password_hash:
+            if has_valid_pw_cookie(request, tag_share.share_id):
+                respect_limit = tag_share_respects_limit_tag(tag_share.password_hash,
+                                                             tag_share.show_in_gallery,
+                                                             tag_share.apply_limit_tag)
+                if await is_video_in_tag(tag_share.stash_tag_id, sid,
+                                         respect_limit_tag=respect_limit):
+                    return False  # allowed, but private (no CDN cache)
 
     # 4. No capability → 403.
     raise HTTPException(status_code=403, detail="Password required")

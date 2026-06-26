@@ -1692,6 +1692,229 @@ td a:hover {
     color: var(--text);
 }
 
+/* --- Faceted search bar (gallery-scoped) --- */
+.faceted-search {
+    max-width: 1500px;
+    margin: 0 auto 16px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.faceted-search-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    max-width: 560px;
+    position: relative;
+    padding: 4px 12px;
+    background-color: var(--surface-2);
+    border: 1px solid var(--border-accent);
+    border-radius: var(--r-sm);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.faceted-search-bar:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
+.faceted-search-icon {
+    flex: 0 0 auto;
+    color: var(--text-mute);
+    pointer-events: none;
+}
+
+.faceted-tag-box {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    align-items: center;
+    flex: 1 1 auto;
+    min-height: 28px;
+    cursor: text;
+}
+
+.faceted-tag-box.focused {
+    /* Visual focus cue is on the parent bar via :focus-within */
+}
+
+.faceted-tag-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(255, 0, 128, 0.18);
+    color: #f6d9ec;
+    border: 1px solid rgba(255, 0, 128, 0.4);
+    border-radius: 999px;
+    padding: 2px 6px 2px 9px;
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.faceted-tag-chip .faceted-tag-x {
+    cursor: pointer;
+    font-weight: 700;
+    line-height: 1;
+    opacity: 0.8;
+    border: none;
+    background: none;
+    color: inherit;
+    padding: 0 2px;
+    font-size: 0.9rem;
+}
+
+.faceted-tag-chip .faceted-tag-x:hover {
+    opacity: 1;
+}
+
+/* --- Entity type variants for chips --- */
+.faceted-chip-performer {
+    background: rgba(255, 110, 199, 0.18);
+    color: #f6d9ec;
+    border-color: rgba(255, 110, 199, 0.4);
+}
+
+.faceted-chip-studio {
+    background: rgba(255, 165, 0, 0.18);
+    color: #f6d9ec;
+    border-color: rgba(255, 165, 0, 0.4);
+}
+
+.faceted-chip-tag {
+    background: rgba(110, 199, 255, 0.18);
+    color: #f6d9ec;
+    border-color: rgba(110, 199, 255, 0.4);
+}
+
+/* --- Entity prefix colors in suggestion dropdown --- */
+.faceted-suggestion-performer .faceted-suggestion-prefix {
+    color: #ff6ec7;
+}
+
+.faceted-suggestion-studio .faceted-suggestion-prefix {
+    color: #ffa500;
+}
+
+.faceted-suggestion-tag .faceted-suggestion-prefix {
+    color: #6ec7ff;
+}
+
+#faceted-query-input {
+    flex: 1 1 auto;
+    min-width: 120px;
+    border: none !important;
+    background: none !important;
+    padding: 4px 2px !important;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.92rem;
+}
+
+#faceted-query-input:focus {
+    outline: none;
+}
+
+#faceted-query-input::placeholder {
+    color: var(--text-mute);
+}
+
+.faceted-tag-suggestions {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    z-index: 50;
+    margin-top: 4px;
+    max-height: 220px;
+    overflow-y: auto;
+    background: var(--surface-2);
+    border: 1px solid var(--border-accent);
+    border-radius: var(--r-sm);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    display: none;
+}
+
+.faceted-tag-suggestions.open {
+    display: block;
+}
+
+.faceted-tag-suggestion {
+    padding: 8px 12px;
+    font-size: 0.86rem;
+    cursor: pointer;
+    color: var(--text-dim);
+    transition: background-color 0.15s ease;
+}
+
+.faceted-tag-suggestion.active,
+.faceted-tag-suggestion:hover {
+    background: rgba(255, 0, 128, 0.2);
+}
+
+.faceted-tag-suggestions .empty {
+    padding: 8px 12px;
+    font-size: 0.82rem;
+    opacity: 0.6;
+}
+
+.faceted-clear-btn {
+    flex: 0 0 auto;
+    background: none;
+    border: none;
+    color: var(--text-mute);
+    cursor: pointer;
+    padding: 6px;
+    border-radius: var(--r-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.2s ease;
+}
+
+.faceted-clear-btn:hover {
+    color: var(--accent);
+}
+
+/* Search results panel (inline gallery grid below the search bar) */
+.faceted-search-results {
+    max-width: 1500px;
+    margin: 0 auto;
+    display: none;
+}
+
+.faceted-search-results.has-results {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 30px;
+    padding: 20px 0;
+}
+
+.faceted-search-empty {
+    padding: 20px;
+    color: var(--text-mute);
+    text-align: center;
+    font-size: 0.9rem;
+    grid-column: 1 / -1;
+}
+
+@media (max-width: 768px) {
+    .faceted-search-results.has-results {
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: 20px;
+    }
+}
+
+@media (max-width: 480px) {
+    .faceted-search-results.has-results {
+        gap: 15px;
+    }
+    .faceted-search-bar {
+        max-width: 100%;
+    }
+}
+
 .video-card {
     position: relative;
 }

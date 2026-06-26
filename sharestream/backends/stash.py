@@ -331,7 +331,7 @@ async def get_videos_by_tag(tag_id: str, page: int = 1, per_page: int = 1000, so
                 "tags": [{"id": tag["id"], "name": tag["name"]}
                          for tag in _visible_scene_tags(scene.get("tags", []))],
                 "performers": [{"id": p["id"], "name": p["name"]} for p in scene.get("performers", [])],
-                "studio": scene.get("studio", {}).get("name", "") if scene.get("studio") else "",
+                "studio": scene.get("studio") if scene.get("studio") else None,
                 "resolution": (
                     f"{scene['files'][0]['width']}x{scene['files'][0]['height']}"
                     if scene.get("files") and scene["files"][0].get("width") and scene["files"][0].get("height")

@@ -63,7 +63,8 @@ def _resolve_slug(db: Session, slug: str) -> tuple[int, VideoOverride | None] | 
 # Shared renderer for the video player template.
 # ---------------------------------------------------------------------------
 async def _render_video_page(request, db, stash_video_id, override, slug_for_context,
-                              verify_action_prefix="/v", page_slug=None):
+                              verify_action_prefix="/v", page_slug=None,
+                              via_share_id=None):
     """Build the ``video-player.html`` response for a scene cleared for playback.
 
     The template receives the Hashid slug (``hashid`` == vanity slug or Sqids
@@ -72,7 +73,12 @@ async def _render_video_page(request, db, stash_video_id, override, slug_for_con
     route point the password form at its own endpoint (``/{slug}/verify``) instead
     of ``/v/``.  ``page_slug`` is the slug that appears in the browser address bar;
     it determines the canonical / og:url.  When omitted the canonical URL is
-    derived from ``slug_for_context`` and ``verify_action_prefix``."""
+    derived from ``slug_for_context`` and ``verify_action_prefix``.
+
+    ``via_share_id`` (optional) is the gallery share id when this video is being
+    rendered inside a curated Gallery (``/{gallery_slug}/{sqid}``); it is passed
+    to the template so media URLs can append ``?via=<share_id>`` and the password
+    prompt can target the gallery-scoped route."""
     video_details = await get_video_details(stash_video_id) or {}
     hit_count = get_total_plays(db, stash_video_id)
     hashid = slug_for_context
@@ -102,6 +108,7 @@ async def _render_video_page(request, db, stash_video_id, override, slug_for_con
         hit_count=hit_count,
         canonical_url=canonical_url,
         verify_action=f"{verify_action_prefix}/{slug_for_context}/verify" if verify_action_prefix else f"/{slug_for_context}/verify",
+        via_share_id=via_share_id,
     )
     return HTMLResponse(render("video-player.html", **context))
 

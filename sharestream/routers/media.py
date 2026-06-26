@@ -116,12 +116,12 @@ def _tighten_if_private(resp, cacheable: bool):
 # Canonical scene media: /media/{sqid}/...
 # ------------------------------------------------------------------
 @router.get("/media/{sqid}/stream.m3u8")
-async def serve_scene_m3u8(sqid: str, request: Request = None):
+async def serve_scene_m3u8(sqid: str, request: Request = None, via: str | None = None):
     sid = _sqid_to_sid(sqid)
     if sid is None:
         raise HTTPException(status_code=404, detail="Video not found")
     try:
-        cacheable = await access.authorize_scene_media(request, sid)
+        cacheable = await access.authorize_scene_media(request, sid, via_share_id=via)
         m3u8_path = SHARES_DIR / f"{sqid}.m3u8"
         if not m3u8_path.exists():
             logger.warning(f".m3u8 not found for sqid={sqid} (sid={sid}), generating")
@@ -138,12 +138,13 @@ async def serve_scene_m3u8(sqid: str, request: Request = None):
 
 
 @router.get("/media/{sqid}/stream/{segment}", response_class=StreamingResponse)
-async def proxy_scene_segment(sqid: str, segment: str, request: Request = None):
+async def proxy_scene_segment(sqid: str, segment: str, request: Request = None,
+                              via: str | None = None):
     sid = _sqid_to_sid(sqid)
     if sid is None:
         raise HTTPException(status_code=404, detail="Video not found")
     try:
-        cacheable = await access.authorize_scene_media(request, sid)
+        cacheable = await access.authorize_scene_media(request, sid, via_share_id=via)
         return _apply_video_cache(
             await media_proxy.stream_segment(sid, segment, DEFAULT_RESOLUTION), cacheable)
     except HTTPException:
@@ -154,52 +155,53 @@ async def proxy_scene_segment(sqid: str, segment: str, request: Request = None):
 
 
 @router.get("/media/{sqid}/preview")
-async def proxy_scene_preview(sqid: str, request: Request = None):
+async def proxy_scene_preview(sqid: str, request: Request = None, via: str | None = None):
     sid = _sqid_to_sid(sqid)
     if sid is None:
         raise HTTPException(status_code=404, detail="Video not found")
-    cacheable = await access.authorize_scene_media(request, sid)
+    cacheable = await access.authorize_scene_media(request, sid, via_share_id=via)
     return _apply_video_cache(await media_proxy.stream_simple_preview(sid), cacheable)
 
 
 @router.api_route("/media/{sqid}/stream.mp4", methods=["GET", "HEAD"])
-async def serve_scene_mp4(sqid: str, request: Request):
+async def serve_scene_mp4(sqid: str, request: Request, via: str | None = None):
     sid = _sqid_to_sid(sqid)
     if sid is None:
         raise HTTPException(status_code=404, detail="Video not found")
-    cacheable = await access.authorize_scene_media(request, sid)
+    cacheable = await access.authorize_scene_media(request, sid, via_share_id=via)
     return _apply_video_cache(await media_proxy.proxy_preview(sid, request), cacheable)
 
 
 @router.api_route("/media/{sqid}/full.mp4", methods=["GET", "HEAD"])
-async def serve_scene_full_mp4(sqid: str, request: Request):
+async def serve_scene_full_mp4(sqid: str, request: Request, via: str | None = None):
     sid = _sqid_to_sid(sqid)
     if sid is None:
         raise HTTPException(status_code=404, detail="Video not found")
-    cacheable = await access.authorize_scene_media(request, sid)
+    cacheable = await access.authorize_scene_media(request, sid, via_share_id=via)
     return _apply_video_cache(await media_proxy.proxy_full(sid, DEFAULT_RESOLUTION, request), cacheable)
 
 
 @router.api_route("/media/{sqid}/webp", methods=["GET", "HEAD"])
-async def serve_scene_webp(sqid: str, request: Request):
+async def serve_scene_webp(sqid: str, request: Request, via: str | None = None):
     sid = _sqid_to_sid(sqid)
     if sid is None:
         raise HTTPException(status_code=404, detail="Video not found")
-    cacheable = await access.authorize_scene_media(request, sid)
+    cacheable = await access.authorize_scene_media(request, sid, via_share_id=via)
     return _tighten_if_private(await media_proxy.proxy_webp(sid, request), cacheable)
 
 
 @router.api_route("/media/{sqid}/thumb", methods=["GET", "HEAD"])
-async def serve_scene_thumb(sqid: str, request: Request):
+async def serve_scene_thumb(sqid: str, request: Request, via: str | None = None):
     sid = _sqid_to_sid(sqid)
     if sid is None:
         raise HTTPException(status_code=404, detail="Video not found")
-    cacheable = await access.authorize_scene_media(request, sid)
+    cacheable = await access.authorize_scene_media(request, sid, via_share_id=via)
     return _tighten_if_private(await media_proxy.proxy_thumb(sid, request), cacheable)
 
 
 @router.get("/media/{sqid}/thumbnail.jpg")
-async def serve_scene_thumbnail(sqid: str, request: Request = None, placeholder: bool = True):
+async def serve_scene_thumbnail(sqid: str, request: Request = None, placeholder: bool = True,
+                                via: str | None = None):
     """Cached screenshot served through the access gate (never a redirect to a
     public /static URL, which would sidestep the gate). The player passes
     ?placeholder=false so a missing screenshot leaves the player black instead
@@ -207,7 +209,7 @@ async def serve_scene_thumbnail(sqid: str, request: Request = None, placeholder:
     sid = _sqid_to_sid(sqid)
     if sid is None:
         raise HTTPException(status_code=404, detail="Video not found")
-    cacheable = await access.authorize_scene_media(request, sid)
+    cacheable = await access.authorize_scene_media(request, sid, via_share_id=via)
     thumbnail_path = await fetch_and_cache_thumbnail(str(sid), sid)
     if thumbnail_path:
         cc = "public, max-age=300" if cacheable else "private, no-store"

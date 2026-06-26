@@ -45,7 +45,33 @@
         {% if tag_name %}
         <h1>{{ tag_name }}{% if total_videos %} ({{ total_videos_label }} total){% endif %}</h1>
         {% endif %}
-        
+
+        {% if collection_share_id %}
+        <!-- Faceted search bar: text query + tag picker + sort, only inside a curated Gallery -->
+        <div class="faceted-search">
+            <div class="faceted-search-bar" id="faceted-search-bar">
+                <svg class="faceted-search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
+                    <path d="M16 16L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <div class="faceted-tag-box" id="faceted-tag-box">
+                    <!-- Tag chips inserted here by JS -->
+                    <input type="text" id="faceted-query-input"
+                           placeholder="Search in this gallery..."
+                           autocomplete="off"
+                           aria-label="Search in this gallery">
+                </div>
+                <div class="faceted-tag-suggestions" id="faceted-tag-suggestions"></div>
+            </div>
+            <button type="button" id="faceted-clear-btn" class="faceted-clear-btn" title="Clear search" style="display:none;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+                </svg>
+            </button>
+        </div>
+        <div id="faceted-search-results" class="faceted-search-results"></div>
+        {% endif %}
+
         <!-- Sort Dropdown -->
         <div class="sort-container">
             <label for="sort-select">Sort by:</label>
@@ -129,6 +155,322 @@
     </div>
 
     {% if gallery_mode %}<script src="{{ asset('static/gallery-masonry.js') }}" defer></script>{% endif %}
+    {% if collection_share_id %}
+    <script>
+    (function () {
+        // Faceted search: text query + entity chips (tags, performers, studios) + sort, scoped to this gallery.
+        var galleryId = {{ collection_share_id|tojson }};
+        var queryInput = document.getElementById('faceted-query-input');
+        var tagBox = document.getElementById('faceted-tag-box');
+        var tagSuggestions = document.getElementById('faceted-tag-suggestions');
+        var resultsPanel = document.getElementById('faceted-search-results');
+        var clearBtn = document.getElementById('faceted-clear-btn');
+        if (!queryInput || !tagBox || !tagSuggestions || !resultsPanel || !clearBtn) return;
+
+        var activeEntities = [];  // [{id, name, type}]
+        var activeIdx = -1;
+        var debounceTimer = null;
+        var entityCache = null;  // [{type, id, name}]
+
+        // ---- Pre-warm the stale-while-revalidate autocomplete cache ----
+        (function prewarmCache() {
+            fetch('/api/tags/autocomplete?q=a&gallery=' + encodeURIComponent(galleryId))
+                .then(function (r) { return r.json(); })
+                .catch(function () {});
+        })();
+
+        // ---- Entity vocab: load once from /api/tags/autocomplete?gallery=<id> ----
+        function loadEntityVocab() {
+            if (entityCache) return Promise.resolve(entityCache);
+            return fetch('/api/tags/autocomplete?gallery=' + encodeURIComponent(galleryId))
+                .then(function (r) { return r.ok ? r.json() : []; })
+                .then(function (entities) { entityCache = entities || []; return entityCache; })
+                .catch(function () { entityCache = []; return entityCache; });
+        }
+
+        // ---- Entity picker: matching / rendering / keyboard ----
+        function currentMatches() {
+            var q = queryInput.value.trim().toLowerCase();
+            if (q.length < 2) return [];
+
+            var chosen = new Set(activeEntities.map(function (e) { return e.type + ':' + e.id; }));
+            var vocab = entityCache || [];
+            var list = vocab.filter(function (e) { return !chosen.has(e.type + ':' + e.id); });
+
+            if (!q) {
+                return list.slice(0, 30);
+            }
+            var prefix = [], contains = [];
+            for (var i = 0; i < list.length; i++) {
+                var e = list[i];
+                var n = e.name.toLowerCase();
+                if (n.startsWith(q)) prefix.push(e);
+                else if (n.indexOf(q) >= 0) contains.push(e);
+            }
+            prefix.sort(function (a, b) { return a.name.localeCompare(b.name); });
+            contains.sort(function (a, b) { return a.name.localeCompare(b.name); });
+            return prefix.concat(contains).slice(0, 30);
+        }
+
+        function entityPrefix(type) {
+            if (type === 'performer') return 'Performer: ';
+            if (type === 'studio') return 'Studio: ';
+            return 'Tag: ';
+        }
+
+        function entitySuggestionClass(type) {
+            if (type === 'performer') return 'faceted-suggestion-performer';
+            if (type === 'studio') return 'faceted-suggestion-studio';
+            return 'faceted-suggestion-tag';
+        }
+
+        function entityChipClass(type) {
+            if (type === 'performer') return 'faceted-chip-performer';
+            if (type === 'studio') return 'faceted-chip-studio';
+            return 'faceted-chip-tag';
+        }
+
+        function renderSuggestions() {
+            var matches = currentMatches();
+            activeIdx = matches.length ? 0 : -1;
+            if (!matches.length) { closeSuggestions(); return; }
+            tagSuggestions.innerHTML = matches.map(function (e, i) {
+                var cls = 'faceted-tag-suggestion ' + entitySuggestionClass(e.type) + (i === activeIdx ? ' active' : '');
+                return '<div class="' + cls + '" data-id="' + e.id + '" data-name="' + escapeHtml(e.name) + '" data-type="' + e.type + '">' +
+                    '<span class="faceted-suggestion-prefix">' + entityPrefix(e.type) + '</span>' + escapeHtml(e.name) +
+                    '</div>';
+            }).join('');
+            tagSuggestions.querySelectorAll('.faceted-tag-suggestion').forEach(function (el) {
+                el.addEventListener('mousedown', function (e) {
+                    e.preventDefault();
+                    addEntity(el.dataset.id, el.dataset.name, el.dataset.type);
+                });
+            });
+            tagSuggestions.classList.add('open');
+        }
+
+        function closeSuggestions() {
+            tagSuggestions.classList.remove('open');
+            tagSuggestions.innerHTML = '';
+            activeIdx = -1;
+        }
+
+        function addEntity(id, name, type) {
+            if (activeEntities.some(function (e) { return e.id === id && e.type === type; })) return;
+            activeEntities.push({ id: id, name: name, type: type });
+            renderChips();
+            queryInput.value = '';
+            closeSuggestions();
+            updateClearBtn();
+            doSearch();
+            queryInput.focus();
+        }
+
+        function removeEntity(id, type) {
+            activeEntities = activeEntities.filter(function (e) { return !(e.id === id && e.type === type); });
+            renderChips();
+            updateClearBtn();
+            doSearch();
+            queryInput.focus();
+        }
+
+        function renderChips() {
+            var html = '';
+            for (var i = 0; i < activeEntities.length; i++) {
+                var e = activeEntities[i];
+                html += '<span class="faceted-tag-chip ' + entityChipClass(e.type) + '" data-id="' + escapeHtml(e.id) + '" data-type="' + e.type + '">' +
+                    escapeHtml(e.name) + '<button type="button" class="faceted-tag-x" aria-label="Remove">&times;</button>' +
+                    '</span>';
+            }
+            // Remove old chips (keep the input element)
+            var chips = tagBox.querySelectorAll('.faceted-tag-chip');
+            chips.forEach(function (c) { c.remove(); });
+            if (html) {
+                var span = document.createElement('span');
+                span.innerHTML = html;
+                var nodes = Array.from(span.childNodes);
+                for (var j = 0; j < nodes.length; j++) {
+                    tagBox.insertBefore(nodes[j], queryInput);
+                }
+            }
+            // Wire up remove handlers
+            tagBox.querySelectorAll('.faceted-tag-x').forEach(function (btn) {
+                btn.addEventListener('click', function (ev) {
+                    ev.stopPropagation();
+                    var chip = ev.target.closest('.faceted-tag-chip');
+                    if (chip) removeEntity(chip.dataset.id, chip.dataset.type);
+                });
+            });
+        }
+
+        function highlightSuggestion() {
+            var els = tagSuggestions.querySelectorAll('.faceted-tag-suggestion');
+            els.forEach(function (el, i) { el.classList.toggle('active', i === activeIdx); });
+            var active = els[activeIdx];
+            if (active) active.scrollIntoView({ block: 'nearest' });
+        }
+
+        function onInputKey(e) {
+            var matches = currentMatches();
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (matches.length) { activeIdx = (activeIdx + 1) % matches.length; highlightSuggestion(); }
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (matches.length) { activeIdx = (activeIdx - 1 + matches.length) % matches.length; highlightSuggestion(); }
+            } else if (e.key === 'Enter' || e.key === 'Tab') {
+                if (activeIdx >= 0 && matches[activeIdx]) {
+                    e.preventDefault();
+                    var e2 = matches[activeIdx];
+                    addEntity(e2.id, e2.name, e2.type);
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    doSearch();
+                }
+            } else if (e.key === 'Backspace' && !queryInput.value && activeEntities.length) {
+                var last = activeEntities[activeEntities.length - 1];
+                removeEntity(last.id, last.type);
+            } else if (e.key === 'Escape') {
+                closeSuggestions();
+            }
+        }
+
+        // ---- Search execution ----
+        function doSearch() {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(executeSearch, 200);
+        }
+
+        function executeSearch() {
+            var q = queryInput.value.trim();
+            var tagIds = activeEntities.filter(function (e) { return e.type === 'tag'; }).map(function (e) { return e.id; }).join(',');
+            var performerIds = activeEntities.filter(function (e) { return e.type === 'performer'; }).map(function (e) { return e.id; }).join(',');
+            var studioIds = activeEntities.filter(function (e) { return e.type === 'studio'; }).map(function (e) { return e.id; }).join(',');
+            // If there's no query and no entities, clear results
+            if (!q && !tagIds && !performerIds && !studioIds) {
+                resultsPanel.innerHTML = '';
+                resultsPanel.classList.remove('has-results');
+                return;
+            }
+            var params = new URLSearchParams();
+            if (q) params.set('q', q);
+            if (tagIds) params.set('tags', tagIds);
+            if (performerIds) params.set('performers', performerIds);
+            if (studioIds) params.set('studios', studioIds);
+            if (galleryId) params.set('gallery', galleryId);
+
+            fetch('/api/search?' + params.toString())
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (!data.results || !data.results.length) {
+                        resultsPanel.innerHTML = '<div class="faceted-search-empty">No matches found.</div>';
+                        resultsPanel.classList.add('has-results');
+                        return;
+                    }
+                    var html = data.results.map(renderCard).join('');
+                    resultsPanel.innerHTML = html;
+                    resultsPanel.classList.add('has-results');
+                    wireHoverPreviews();
+                })
+                .catch(function () {
+                    resultsPanel.innerHTML = '<div class="faceted-search-empty">Search failed. Try again.</div>';
+                    resultsPanel.classList.add('has-results');
+                });
+        }
+
+        function renderCard(v) {
+            var name = escapeHtml(v.video_name || 'Untitled');
+            var url = '/' + encodeURIComponent(galleryId) + '/' + encodeURIComponent(v.sqid);
+            var thumb = v.thumbnail_url || '/static/default_thumbnail.jpg';
+            var lazy = v.lazy_thumbnail_url ? ' data-lazy-src="' + v.lazy_thumbnail_url + '"' : '';
+            var imgCls = v.lazy_thumbnail_url ? ' class="lazy-load"' : '';
+            var hits = v.hits > 0 ? '<div class="hit-counter" title="Play count"><svg class="eye-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 5C7 5 2.73 8.11 1 12.5C2.73 16.89 7 20 12 20C17 20 21.27 16.89 23 12.5C21.27 8.11 17 5 12 5Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12.5" r="3" stroke="currentColor" stroke-width="2"/></svg><span>' + v.hits + '</span></div>' : '';
+            var dur = v.duration_label ? '<div class="duration-badge" title="Runtime"><svg class="clock-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3.5 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>' + v.duration_label + '</span></div>' : '';
+            var aspect = v.aspect ? ' style="--card-aspect: ' + v.aspect.toFixed(4) + '"' : '';
+            return '<div class="video-card" data-preview-url="' + (v.preview_url || '') + '"' + aspect + '>' +
+                '<a href="' + url + '">' +
+                '<div class="thumb">' +
+                '<img src="' + thumb + '"' + lazy + imgCls + ' alt="' + name + '">' +
+                '<img class="preview-webp" alt="" loading="lazy">' +
+                hits + dur +
+                '</div>' +
+                '<div class="title">' + name + '</div>' +
+                '</a></div>';
+        }
+
+        function wireHoverPreviews() {
+            var hoverTimers = new WeakMap();
+            resultsPanel.querySelectorAll('.video-card').forEach(function (card) {
+                var previewUrl = card.getAttribute('data-preview-url');
+                var webp = card.querySelector('img.preview-webp');
+                if (!previewUrl || !webp) return;
+                card.addEventListener('mouseenter', function () {
+                    var t = setTimeout(function () {
+                        if (!webp.getAttribute('src')) webp.src = previewUrl;
+                        webp.classList.add('is-visible');
+                    }, 250);
+                    hoverTimers.set(card, t);
+                });
+                card.addEventListener('mouseleave', function () {
+                    clearTimeout(hoverTimers.get(card));
+                    webp.classList.remove('is-visible');
+                });
+            });
+        }
+
+        // ---- Clear button ----
+        function updateClearBtn() {
+            var hasContent = queryInput.value.trim() || activeEntities.length;
+            clearBtn.style.display = hasContent ? '' : 'none';
+        }
+
+        clearBtn.addEventListener('click', function () {
+            queryInput.value = '';
+            activeEntities = [];
+            tagBox.querySelectorAll('.faceted-tag-chip').forEach(function (c) { c.remove(); });
+            resultsPanel.innerHTML = '';
+            resultsPanel.classList.remove('has-results');
+            updateClearBtn();
+            closeSuggestions();
+        });
+
+        // ---- Event wiring ----
+        tagBox.addEventListener('click', function () { queryInput.focus(); });
+        queryInput.addEventListener('focus', function () {
+            tagBox.classList.add('focused');
+            loadEntityVocab();
+        });
+        queryInput.addEventListener('blur', function () {
+            tagBox.classList.remove('focused');
+            setTimeout(closeSuggestions, 150);
+        });
+        queryInput.addEventListener('input', function () {
+            updateClearBtn();
+            var val = queryInput.value.trim();
+            if (val.length >= 2) {
+                loadEntityVocab().then(renderSuggestions);
+            } else {
+                closeSuggestions();
+            }
+            doSearch();
+        });
+        queryInput.addEventListener('keydown', onInputKey);
+
+        // Close suggestions when clicking outside
+        document.addEventListener('click', function (e) {
+            if (!tagSuggestions.contains(e.target) && e.target !== queryInput) {
+                closeSuggestions();
+            }
+        });
+
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, function (c) {
+                return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+            });
+        }
+    })();
+    </script>
+    {% endif %}
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             // Sorting dropdown logic

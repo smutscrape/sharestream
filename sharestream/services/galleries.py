@@ -387,7 +387,8 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
 
         video_cards.append({
             "video_name": video["title"],
-            "share_url": f"/v/{slug_map[vid]}",
+            # Gallery-scoped video URL: /{gallery_slug}/{sqid}
+            "share_url": f"/{share_id}/{slug_map[vid]}",
             "preview_url": f"/media/{slug_map.get(vid, vid)}/webp",
             "thumbnail_url": thumb_route if eager else "/static/default_thumbnail.jpg",
             "lazy_thumbnail_url": thumb_route if not eager else None,
