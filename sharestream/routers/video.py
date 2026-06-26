@@ -37,7 +37,7 @@ from sharestream.db.models import VideoOverride
 from sharestream.db.session import get_db
 from sharestream.services import access
 from sharestream.services.embed_policy import should_embed_full
-from sharestream.services.hits import get_total_plays
+from sharestream.services.hits import get_total_plays, increment_scene_view
 from sharestream.services.slugs import decode_video_id, encode_video_id
 from sharestream.services.visitors import log_first_visit
 
@@ -79,6 +79,12 @@ async def _render_video_page(request, db, stash_video_id, override, slug_for_con
     rendered inside a curated Gallery (``/{gallery_slug}/{sqid}``); it is passed
     to the template so media URLs can append ``?via=<share_id>`` and the password
     prompt can target the gallery-scoped route."""
+    # Count one view for this scene (unified per-scene counter). Every watch
+    # entry point (/v/, gallery-scoped, individual-share) funnels through this
+    # helper, so all paths contribute to the same total. Media subrequests,
+    # embeds, and the password-verification flow do NOT reach here — they are
+    # handled by separate routes that never call _render_video_page.
+    increment_scene_view(db, stash_video_id)
     video_details = await get_video_details(stash_video_id) or {}
     hit_count = get_total_plays(db, stash_video_id)
     hashid = slug_for_context

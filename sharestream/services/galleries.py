@@ -457,9 +457,15 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
     return context
 
 
-async def build_tag_name_gallery_context(db: Session, tag_name: str, request=None) -> dict:
-    """Assemble the ``/gallery/tag/{name}`` context: public shares whose videos
-    carry the requested tag. Raises 404 if the tag is unknown to Stash."""
+async def build_tag_name_gallery_context(db: Session, tag_name: str, request=None,
+                                         page: int = 1, sort: str = 'date') -> dict:
+    """Assemble the ``/tag/{name}`` context: a direct, paginated listing of the
+    requested Stash tag's scenes, filtered to listed/public visibility only.
+
+    This is a visibility-driven single-tag listing — it does NOT scan public
+    shares to discover videos. The request cost scales with the requested tag,
+    not with all public shares on the site.
+    Raises 404 if the tag is unknown to Stash."""
     # 1. Find tag_id from Stash
     tag_info = await find_tag_by_name(tag_name)
     if not tag_info:
@@ -467,103 +473,64 @@ async def build_tag_name_gallery_context(db: Session, tag_name: str, request=Non
 
     tag_id = tag_info["id"]
 
-    # 2. Find all videos with this tag from Stash
+    # 2. Fetch every scene that carries this tag from Stash, then filter by
+    # visibility. Public /tag/{tag} only shows listed/public scenes — never
+    # hidden, never unlisted. Hidden overrides everything.
     all_videos_with_tag = await get_all_videos_by_tag(tag_id)
-    # Public /tag/{tag} gallery only shows listed/public scenes — never hidden,
-    # never unlisted. Hidden overrides everything.
-    target_videos_list = [
+    visible_videos = [
         v for v in all_videos_with_tag
         if v.get("_visibility") in ("listed", "public")
     ]
-    target_video_ids = {int(v['id']) for v in target_videos_list}
-    # Runtime per scene (for the duration badge) from the same Stash payload.
-    durations = {int(v['id']): v.get('duration') for v in target_videos_list}
-    # One aggregate play-count lookup for every candidate scene, so counts match
-    # the rest of the site regardless of which share surfaced the video here.
-    total_plays = get_total_plays_map(db, target_video_ids)
 
-    # If no videos have this tag, we can show an empty gallery
-    if not target_video_ids:
-        logger.info(f"No videos found for tag '{tag_name}' in Stash.")
+    # 3. Sort in Python (consistent with the tag-share gallery). Title A→Z is
+    # the historical default for this view; date/hits/rating/duration/random
+    # are also supported.
+    sort_video_dicts(visible_videos, sort)
 
-    # 3. Get all active shares from DB. This by-tag gallery is public, so —
-    # like the home gallery — it must EXCLUDE password-protected shares;
-    # otherwise it would leak their thumbnails, names and links to anyone who
-    # hits /gallery/tag/<name> without the password.
-    current_time = datetime.datetime.now(timezone.utc)
-    individual_shares = db.query(SharedVideo).filter(
-        SharedVideo.expires_at > current_time,
-        SharedVideo.password_hash == None,
-    ).all()
-    tag_shares = db.query(SharedTag).filter(
-        SharedTag.expires_at > current_time,
-        SharedTag.password_hash == None,
-    ).all()
+    # 4. Paginate the filtered, sorted set.
+    per_page = GALLERY_PER_PAGE
+    if page < 1:
+        page = 1
+    total_videos = len(visible_videos)
+    total_pages = max(1, (total_videos + per_page - 1) // per_page)
+    has_prev_page = page > 1
+    has_next_page = page < total_pages
+    start = (page - 1) * per_page
+    page_videos = visible_videos[start:start + per_page]
 
+    if not total_videos:
+        logger.info(f"No listed/public videos found for tag '{tag_name}'.")
+
+    # 5. One aggregate play-count lookup for every visible scene, so counts
+    # match the rest of the site.
+    total_plays = get_total_plays_map(db, [int(v["id"]) for v in page_videos])
+
+    # 6. Build cards directly from the filtered tag set. Warm the first 20
+    # screenshots concurrently (the rest lazy-load).
+    slug_map = canonical_video_slugs(db, [int(v["id"]) for v in page_videos])
     video_cards = []
-    processed_video_ids = set()
     warm_coros = []
+    for i, video in enumerate(page_videos):
+        vid = int(video["id"])
+        sqid = slug_map.get(vid, str(vid))
+        eager = i < 20
+        if eager:
+            warm_coros.append(fetch_and_cache_thumbnail(str(vid), vid))
 
-    # 4. Process individual shares
-    logger.info(f"Processing {len(individual_shares)} individual shares for tag '{tag_name}' gallery...")
-    for video in individual_shares:
-        if video.stash_video_id in target_video_ids and video.stash_video_id not in processed_video_ids:
-            logger.debug(f"Found match in individual share: video_id={video.stash_video_id}")
-            sid = video.stash_video_id
-            warm_coros.append(fetch_and_cache_thumbnail(str(sid), sid))
-            video_cards.append({
-                "stash_video_id": sid,
-                "preview_url": None,  # backfilled from slug_map below
-                "video_name": video.video_name,
-                "thumbnail_url": None,  # backfilled from slug_map below
-                "hits": total_plays.get(sid, 0),
-                "duration_label": format_duration(durations.get(sid)),
-                "lazy_thumbnail_url": None,
-            })
-            processed_video_ids.add(sid)
-
-    # 5. Process tag shares. Fetch each tag share's scenes concurrently, then
-    # process the results in original order (preserving dedup behavior).
-    logger.info(f"Processing {len(tag_shares)} tag shares for tag '{tag_name}' gallery...")
-    tag_videos_lists = await asyncio.gather(
-        *(get_all_videos_by_tag(t.stash_tag_id) for t in tag_shares)
-    ) if tag_shares else []
-    for tag_share, shared_videos in zip(tag_shares, tag_videos_lists):
-        # We need all videos from this tag share to check against our target tag
-        for video in shared_videos:
-            video_id = int(video['id'])
-            if video_id in target_video_ids and video_id not in processed_video_ids:
-                logger.debug(f"Found match in tag share '{tag_share.tag_name}': video_id={video_id}")
-                video_cards.append({
-                    "stash_video_id": video_id,
-                    "preview_url": None,
-                    "video_name": video["title"],
-                    "thumbnail_url": "/static/default_thumbnail.jpg",
-                    "lazy_thumbnail_url": None,
-                    "hits": total_plays.get(video_id, 0),
-                    "duration_label": format_duration(video.get("duration")),
-                })
-                processed_video_ids.add(video_id)
+        video_cards.append({
+            "video_name": video.get("title"),
+            "share_url": f"/v/{sqid}",
+            "preview_url": f"/media/{sqid}/webp",
+            "thumbnail_url": f"/media/{sqid}/thumbnail.jpg" if eager else "/static/default_thumbnail.jpg",
+            "lazy_thumbnail_url": f"/media/{sqid}/thumbnail.jpg" if not eager else None,
+            "hits": total_plays.get(vid, 0),
+            "duration_label": format_duration(video.get("duration")),
+            "aspect": parse_aspect(video.get("resolution")),
+        })
 
     await _warm_thumbnails(warm_coros)
 
-    # Resolve every card's Hashid slug in one batched query, then backfill ALL
-    # generated URLs so nothing exposes the sequential stash id.
-    slug_map = canonical_video_slugs(db, [c["stash_video_id"] for c in video_cards])
-    for card in video_cards:
-        sqid = slug_map[int(card["stash_video_id"])]
-        card["preview_url"] = f"/media/{sqid}/webp"
-        if card["thumbnail_url"] is None:
-            card["thumbnail_url"] = f"/media/{sqid}/thumbnail.jpg"
-        if card["lazy_thumbnail_url"] is None:
-            card["lazy_thumbnail_url"] = f"/media/{sqid}/thumbnail.jpg"
-        card["share_url"] = f"/v/{sqid}"
-
-    # Sort video cards by name (A→Z), untitled videos last.
-    video_cards.sort(key=lambda x: _title_sort_key(x.get('video_name')))
-
-    total_videos = len(video_cards)
-    logger.info(f"Rendering gallery for tag '{tag_name}' with {total_videos} videos.")
+    tag_description = await get_tag_description(tag_id)
 
     context = site_context(request)
     context.update(
@@ -571,12 +538,16 @@ async def build_tag_name_gallery_context(db: Session, tag_name: str, request=Non
         video_cards=video_cards,
         total_videos=total_videos,
         total_videos_label=format_count(total_videos),
-        current_page=None,  # Disabling pagination for this view
-        has_prev_page=False,
-        has_next_page=False,
+        current_page=page,
+        has_prev_page=has_prev_page,
+        has_next_page=has_next_page,
+        prev_page_url=f"/tag/{tag_name}?page={page-1}&sort={sort}" if has_prev_page else None,
+        next_page_url=f"/tag/{tag_name}?page={page+1}&sort={sort}" if has_next_page else None,
+        sort=sort,
         # Public aggregation page (not a single share): no per-share collection
         # thumbnail, so the template falls back to the site OG image.
         og_title=f"Tag: {tag_name}",
+        og_description=tag_description,
         page_url=f"{BASE_DOMAIN}/tag/{tag_name}",
     )
     return context
