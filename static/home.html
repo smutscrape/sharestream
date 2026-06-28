@@ -60,8 +60,21 @@
             </div>
             {% endfor %}
         </div>
-        
+        {% endif %}
+
+        <!-- Optional home Markdown page (data/pages/home.md), rendered between the
+             featured collections and the featured-videos gallery. -->
+        {% if home_page_html %}
+        <article class="markdown-page home-page">
+            {% if home_page_title %}<h2 class="markdown-page-title">{{ home_page_title }}</h2>{% endif %}
+            <div class="markdown-body">
+                {{ home_page_html | safe }}
+            </div>
+        </article>
+        {% endif %}
+
         <!-- Separator -->
+        {% if tag_cards or home_page_html %}
         <div class="section-separator">
             <div class="separator-line"></div>
             <span class="separator-text">Featured Videos{% if total_videos %} ({{ total_videos_label }} total){% endif %}</span>
@@ -245,4 +258,4 @@
         });
     </script>
 </body>
-</html> 
+</html>

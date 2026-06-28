@@ -32,6 +32,7 @@ from sharestream.config import (
 )
 from sharestream.core.branding import site_context
 from sharestream.db.models import SharedTag, SharedVideo
+from sharestream.routers.pages import get_home_page_context
 from sharestream.services.access import tag_share_respects_limit_tag
 from sharestream.services.cache import prime_tag_membership
 from sharestream.services.hits import get_total_plays_map
@@ -298,6 +299,10 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
                 f"{len(all_video_cards)} of {total_videos} videos shown")
 
     context = site_context(request)
+    # Optional home Markdown page (data/pages/home.md) rendered on / between the
+    # featured collections and the featured-videos gallery. Absent or broken → no
+    # page shown (builders never fail the whole rendered home for this).
+    context.update(get_home_page_context())
     context.update(
         tag_cards=tag_cards,
         all_video_cards=all_video_cards,  # Use the new combined and sorted list

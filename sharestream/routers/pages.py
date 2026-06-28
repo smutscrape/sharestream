@@ -57,6 +57,41 @@ def render_markdown_page(slug: str, request=None) -> HTMLResponse | None:
     return HTMLResponse(render("markdown-page.html", **context))
 
 
+def get_home_page_context() -> dict:
+    """Return template context for the optional home Markdown page
+    (``data/pages/home.md``), or an empty dict when absent.
+
+    The home page is rendered on ``/`` between the featured tag collections and
+    the featured-videos gallery. Mirrors :func:`render_markdown_page`'s rendering
+    (title extraction, leading-``# title`` strip, sanitized Markdown→HTML) but
+    returns the pieces for the home template instead of a full page response, and
+    never raises — a missing/erroring file simply means no home page is shown.
+    """
+    source = read_home_page_source()
+    if source is None:
+        return {}
+    title = markdown_page_title(source, "")
+    body = markdown_page_body(source)
+    return {
+        "home_page_title": title,
+        "home_page_html": render_markdown(body),
+    }
+
+
+def read_home_page_source() -> str | None:
+    """Return the raw text of ``data/pages/home.md`` when it exists, else None.
+    Log and swallow read errors so a broken file never takes the home page down.
+    """
+    path = resolve_markdown_page_path("home")
+    if path is None:
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as e:
+        logger.error(f"Error reading home page {path}: {e}")
+        return None
+
+
 @router.get("/pages/{slug}", response_class=RedirectResponse)
 async def legacy_markdown_page_redirect(slug: str):
     """Permanent redirect for bookmarks/links created before top-level pages."""
