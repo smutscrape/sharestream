@@ -2,7 +2,7 @@
 
 ``footer.action_links`` render as pill buttons (``primary`` or ``secondary``).
 ``footer.links`` render as small inline text links separated by middots.
-When the ``footer`` key is omitted entirely, a single secondary DMCA button
+When the ``footer`` key is omitted entirely, a single secondary Report button
 is shown so existing installs keep working.
 """
 from __future__ import annotations
@@ -49,7 +49,7 @@ def parse_footer_config(config: dict) -> dict:
     if "footer" not in config:
         return {
             "action_links": [
-                {"label": "DMCA Takedown Request", "href": "/dmca", "style": "secondary"},
+                {"label": "Report Content", "href": "/report", "style": "secondary"},
             ],
             "links": [],
         }

@@ -24,7 +24,7 @@ RESERVED_SLUGS = {
     "", "share", "tag", "edit_share", "delete_share", "share_tag",
     "shared_videos", "shared_tags", "delete_tag_share", "edit_tag_share",
     "lookup_tag", "get_video_title", "site_config", "login", "logout",
-    "dmca", "gallery", "static", "admin", "__admin", "video", "v", "api",
+    "dmca", "report", "gallery", "static", "admin", "__admin", "video", "v", "api",
     "favicon.ico", "favicon.png", "robots.txt", "sitemap.xml", "thumbnail", "stream",
     "embed", "fonts.css", "filedrop", "og", "media",
 }

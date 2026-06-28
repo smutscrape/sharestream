@@ -26,12 +26,12 @@ from sharestream.db.migrations import run_migrations
 from sharestream.routers import (
     admin,
     auth,
-    dmca,
     embeds,
     filedrop,
     media,
     pages,
     public,
+    report,
     search,
     shares,
     short_urls,
@@ -109,7 +109,7 @@ def create_app() -> FastAPI:
     app.include_router(video.router)
     app.include_router(media.router)
     app.include_router(embeds.router)
-    app.include_router(dmca.router)
+    app.include_router(report.router)
     app.include_router(filedrop.router)
     app.include_router(pages.router)
     app.include_router(public.router)

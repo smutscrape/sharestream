@@ -182,6 +182,17 @@ else:
     if not isinstance(_new_upload_tags, (list, tuple)):
         _new_upload_tags = [_new_upload_tags]
     FILEDROP_NEW_UPLOAD_TAGS = [str(t) for t in _new_upload_tags if t not in (None, '')]
+    
+# Stash tag IDs that uploaders may NOT manually select in the filedrop tag
+# picker. These are still applied automatically if listed in new_upload_tags.
+# Stored as strings for consistent comparison with Stash ids.
+_filedrop_disallowed = FILEDROP_CONFIG.get('disallowed_user_tags')
+if _filedrop_disallowed in (None, ''):
+    FILEDROP_DISALLOWED_USER_TAGS: set[str] = set()
+else:
+    if not isinstance(_filedrop_disallowed, (list, tuple)):
+        _filedrop_disallowed = [_filedrop_disallowed]
+    FILEDROP_DISALLOWED_USER_TAGS = {str(t) for t in _filedrop_disallowed if t not in (None, '')}
 # When an upload is NOT auto-viewable via a public tag, optionally mint a
 # password-protected SharedVideo (random password) on completion.
 FILEDROP_AUTO_SHARE = bool(FILEDROP_CONFIG.get('auto_share_uploads', False))

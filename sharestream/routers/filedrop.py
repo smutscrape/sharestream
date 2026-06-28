@@ -55,7 +55,7 @@ from sharestream.services.filedrop import (
     trigger_scan_and_tag,
 )
 from sharestream.services.media_proxy import generate_m3u8_file
-from sharestream.services.slugs import generate_share_id
+from sharestream.services.slugs import generate_share_id, canonical_video_slug
 
 logger = logging.getLogger(__name__)
 
@@ -293,12 +293,13 @@ async def filedrop_details(request: Request, scene_id: int = Form(...),
 
     result = {"scene_id": scene_id, "saved": True, "published": False,
               "view_url": None, "share_url": None, "password": None}
-
+    
     # 1. Already publicly viewable via a no-password tag share?
     public_share = find_public_view_share(db, assigned)
     if public_share is not None:
         result["published"] = True
-        result["view_url"] = f"{BASE_DOMAIN}/{public_share.share_id}/{scene_id}"
+        slug = canonical_video_slug(db, scene_id)
+        result["view_url"] = f"{BASE_DOMAIN}/{public_share.share_id}/{slug}"
         return JSONResponse(result)
 
     # 2. Otherwise optionally mint a password-protected per-upload share link.
@@ -558,7 +559,8 @@ async def filedrop_scrape_complete(request: Request, body: ScrapeCompleteRequest
     public_share = find_public_view_share(db, assigned)
     if public_share is not None:
         result["published"] = True
-        result["view_url"] = f"{BASE_DOMAIN}/{public_share.share_id}/{scene_id}"
+        slug = canonical_video_slug(db, scene_id)
+        result["view_url"] = f"{BASE_DOMAIN}/{public_share.share_id}/{slug}"
         return JSONResponse(result)
 
     # 2. Otherwise optionally mint a password-protected per-upload share link.

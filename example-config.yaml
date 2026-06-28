@@ -140,6 +140,11 @@ filedrop:
   # (limit_to_tag unset, the share bypasses it, or limit_to_tag is also in this
   # list) — the upload is viewable immediately and the uploader gets a view link.
   new_upload_tags: []
+  # Stash tag IDs that uploaders are NOT allowed to select in the filedrop tag
+  # picker, even if they appear in the public tag vocabulary. These tags may still
+  # be applied automatically via new_upload_tags above; this only restricts
+  # manual selection. Ignored when allow_user_tags is false.
+  disallowed_user_tags: []
   # tag_id:                             # deprecated single-tag form; still honored as new_upload_tags fallback
   # When an upload is NOT auto-viewable via a public tag (above), mint a
   # password-protected share link with a random password and show it to the
@@ -185,8 +190,8 @@ footer:
     - label: Join Community
       href: /community
       style: primary       # light-green accent
-    - label: DMCA Takedown Request
-      href: /dmca
+    - label: Report Content
+      href: /report
       style: secondary     # purple accent (legacy DMCA button styling)
   links:
     - label: Terms

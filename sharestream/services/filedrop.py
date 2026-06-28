@@ -40,6 +40,7 @@ from sharestream.backends.stash import (
 from sharestream.config import (
     FILEDROP_HOST_DIR,
     FILEDROP_NEW_UPLOAD_TAGS,
+    FILEDROP_DISALLOWED_USER_TAGS,
     FILEDROP_SSH_HOST,
     FILEDROP_SSH_KEY,
     FILEDROP_SSH_PORT,
@@ -212,9 +213,14 @@ async def get_public_tag_vocabulary(db: Session) -> list[dict]:
     return content at ``/gallery/tag/{name}``). ``count`` is the number of public
     videos carrying the tag, used by the picker to rank suggestions. TTL-cached.
 
+    Tags listed in ``FILEDROP_DISALLOWED_USER_TAGS`` are omitted: they may still
+    be applied automatically via ``FILEDROP_NEW_UPLOAD_TAGS``, but uploaders may
+    not select them manually.
+
     These are exactly the tags an uploader is allowed to self-assign: the picker
     offers them and the completion endpoint validates submissions against them.
     """
+
     global _vocab_cache
     now = time.time()
     with _vocab_lock:
@@ -262,6 +268,13 @@ async def get_public_tag_vocabulary(db: Session) -> list[dict]:
         ({"id": tid, "name": name, "count": counts.get(tid, 0)} for tid, name in names.items()),
         key=lambda t: t["name"].lower(),
     )
+
+    # Remove operator-blocklisted tags from the uploader-facing vocabulary.
+    # These may still be applied automatically via FILEDROP_NEW_UPLOAD_TAGS;
+    # this only prevents manual selection.
+    if FILEDROP_DISALLOWED_USER_TAGS:
+        vocab = [t for t in vocab if str(t["id"]) not in FILEDROP_DISALLOWED_USER_TAGS]
+
     with _vocab_lock:
         _vocab_cache = {"expires": now + _VOCAB_TTL_SECONDS, "tags": vocab}  # noqa: F841
     return vocab
