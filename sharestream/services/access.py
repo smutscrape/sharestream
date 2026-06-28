@@ -479,17 +479,27 @@ async def authorize_scene_media(request: Request, stash_video_id: int,
 
     # 3. Gallery-scoped unlock: the caller (gallery-scoped video route) supplies
     #    the exact share_id via ?via=. O(1) lookup — no scan of all tag shares.
-    if via_share_id:
+    if via_share_id: # HEADMASTER CHANGE 6/27 - REVISIT AFTER TESTING
         with SessionLocal() as db:
             tag_share = db.query(SharedTag).filter(SharedTag.share_id == via_share_id).first()
-        if tag_share and tag_share.password_hash:
-            if has_valid_pw_cookie(request, tag_share.share_id):
-                respect_limit = tag_share_respects_limit_tag(tag_share.password_hash,
-                                                             tag_share.show_in_gallery,
-                                                             tag_share.apply_limit_tag)
+        if tag_share:
+            if tag_share.password_hash:
+                # Existing: require unlock cookie for password-protected Galleries
+                if has_valid_pw_cookie(request, tag_share.share_id):
+                    respect_limit = tag_share_respects_limit_tag(
+    tag_share.password_hash, tag_share.show_in_gallery, tag_share.apply_limit_tag)
+                    if await is_video_in_tag(tag_share.stash_tag_id, sid,
+                                            respect_limit_tag=respect_limit):
+                        return False
+            else:
+                # New: non-password Gallery — the share_id itself is the capability.
+                # Anyone who knows the Gallery URL can access its member videos.
+                respect_limit = tag_share_respects_limit_tag(
+                    tag_share.password_hash, tag_share.show_in_gallery, tag_share.apply_limit_tag)
                 if await is_video_in_tag(tag_share.stash_tag_id, sid,
-                                         respect_limit_tag=respect_limit):
-                    return False  # allowed, but private (no CDN cache)
+                                        respect_limit_tag=respect_limit):
+                    return False
+
 
     # 4. No capability → 403.
     raise HTTPException(status_code=403, detail="Password required")

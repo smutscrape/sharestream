@@ -336,16 +336,18 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
 
     # Visibility filter for this surface. Hidden scenes are ALWAYS excluded
     # from gallery listings (no surface shows them). Password-protected shares
-    # may include unlisted scenes; no-password shares may not.
+    # may include unlisted scenes; no-password shares may not. ## HEADMASTER CHANGE 6/27 - REVISIT AFTER TESTING
+
     is_locked = bool(tag_share.password_hash)
     if is_locked:
         # Password-protected share: include everything except hidden.
         def _pass_visibility(v):
             return v.get("_visibility") != "hidden"
     else:
-        # No-password share: include only listed/public (and non-hidden).
+        # No-password share: include everything except hidden.
         def _pass_visibility(v):
-            return v.get("_visibility") in ("listed", "public")
+            return v.get("_visibility") != "hidden" ## HEADMASTER CHANGE 6/27 - REVISIT AFTER TESTING
+
 
     # Aggregate play counts per Stash scene (across every share context), so a
     # video's count matches the home page and its own video page. Populated once

@@ -50,10 +50,10 @@ def _tag_id_or_none(value):
 # Config-driven scene visibility (Phase 2). Each maps a visibility level to a
 # Stash tag id; a scene's level is determined by which of these tags it carries.
 #   public  -> shown on home + search + reachable by direct /v/ link
-#   listed  -> search + direct link, not home
+#   listed  -> search + direct link, not home - REVISIT THIS AFTER REFACTORING SO THAT TAG SHARES MAY INCLUDE UNLISTED
 #   hidden  -> 404 everywhere (overrides all)
 #   (a scene carrying none of these is "unlisted": reachable only by its
-#    unguessable /v/ slug, which is itself the capability to view it)
+#    unguessable /v/ slug, which is itself the capability to view it) - REVISIT THIS AFTER REFACTORING SO THAT TAG SHARES MAY INCLUDE UNLISTED
 # Unset levels disable that tier gracefully (e.g. no hidden tag => nothing is
 # force-hidden), so the app keeps working before the operator configures them.
 VISIBILITY_CONFIG = config['stash'].get('visibility_tags', {}) or {}
@@ -182,7 +182,7 @@ else:
     if not isinstance(_new_upload_tags, (list, tuple)):
         _new_upload_tags = [_new_upload_tags]
     FILEDROP_NEW_UPLOAD_TAGS = [str(t) for t in _new_upload_tags if t not in (None, '')]
-    
+
 # Stash tag IDs that uploaders may NOT manually select in the filedrop tag
 # picker. These are still applied automatically if listed in new_upload_tags.
 # Stored as strings for consistent comparison with Stash ids.
