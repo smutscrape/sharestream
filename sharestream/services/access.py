@@ -422,7 +422,8 @@ async def resolve_scene_access(request: Request, db: Session, stash_video_id: in
 
 
 async def authorize_scene_media(request: Request, stash_video_id: int,
-                               via_share_id: str | None = None) -> bool:
+                               via_share_id: str | None = None,
+                               via_slug: str | None = None) -> bool:
     """Gate a media sub-request keyed to a Stash scene id (the /media/{id}/...
     routes) and RETURN whether the media is publicly cacheable. Raises 404
     (hidden/expired) or 403 ("Password required") to follow the media-route
@@ -477,7 +478,15 @@ async def authorize_scene_media(request: Request, stash_video_id: int,
     if has_valid_pw_cookie(request, str(sid)):
         return False  # allowed but private (don't CDN-cache gated bytes)
 
-    # 3. Gallery-scoped unlock: the caller (gallery-scoped video route) supplies
+    # 3. Individual-share capability via /{slug}. Safe rule:
+    #    * no-password slug share -> allow (the slug itself is the capability)
+    #    * password-protected slug share -> do NOT allow unauthenticated
+    #      crawlers/hotlinks to use via_slug as a bypass
+    if via_slug and override is not None:
+        if override.vanity_slug == str(via_slug) and not ov_password:
+            return False
+
+    # 4. Gallery-scoped unlock: the caller (gallery-scoped video route) supplies
     #    the exact share_id via ?via=. O(1) lookup — no scan of all tag shares.
     if via_share_id: # HEADMASTER CHANGE 6/27 - REVISIT AFTER TESTING
         with SessionLocal() as db:

@@ -205,7 +205,8 @@ async def _render_individual_share(request, db, override, slug):
         )
     resp = await _render_video_page(request, db, stash_video_id, override, sqid,
                                     verify_action_prefix="",
-                                    page_slug=slug)
+                                    page_slug=slug,
+                                    via_slug=slug)
     # Always set the scene-keyed unlock cookie on ALLOW, even when there is no
     # password.  This is what lets an unlisted capability URL (no password) fetch
     # its own media subrequests — authorize_scene_media checks for this cookie

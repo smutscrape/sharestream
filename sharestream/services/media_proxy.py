@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 # HLS playlist generation
 # ------------------------------------------------------------------
 async def generate_m3u8_file(share_id: str, stash_video_id: int, resolution: str,
-                              via_share_id: str | None = None) -> bool:
+                              via_share_id: str | None = None,
+                              via_slug: str | None = None) -> bool:
     """Fetch a scene's HLS playlist from Stash, rewrite its segment URLs to our
     access-gated /media/{sqid}/... proxy route, and persist it.
 
@@ -44,7 +45,12 @@ async def generate_m3u8_file(share_id: str, stash_video_id: int, resolution: str
     from sharestream.services.slugs import encode_video_id
     stash_url = stash.playlist_url(stash_video_id, resolution)
     sqid = encode_video_id(stash_video_id)
-    via_suffix = f"?via={via_share_id}" if via_share_id else ""
+    if via_share_id:
+        via_suffix = f"?via={via_share_id}"
+    elif via_slug:
+        via_suffix = f"?via_slug={via_slug}"
+    else:
+        via_suffix = ""
     try:
         response = await http_client.get(stash_url)
         if response.status_code != 200:

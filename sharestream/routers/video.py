@@ -64,7 +64,7 @@ def _resolve_slug(db: Session, slug: str) -> tuple[int, VideoOverride | None] | 
 # ---------------------------------------------------------------------------
 async def _render_video_page(request, db, stash_video_id, override, slug_for_context,
                               verify_action_prefix="/v", page_slug=None,
-                              via_share_id=None):
+                              via_share_id=None, via_slug=None):
     """Build the ``video-player.html`` response for a scene cleared for playback.
 
     The template receives the Hashid slug (``hashid`` == vanity slug or Sqids
@@ -96,8 +96,11 @@ async def _render_video_page(request, db, stash_video_id, override, slug_for_con
     # Append ?via=<share_id> to the embed video URL when this video is being
     # rendered inside a gallery share — so og:video / twitter:player:stream
     # carry the share context needed for media authorization (otherwise a
-    # non-public scene in a public gallery share would 403 for crawlers).
-    via_qs = f"?via={via_share_id}" if via_share_id else ""
+    # non-public scene would 403 for crawlers). Individual /{slug} shares carry
+    # ?via_slug=<slug> instead when the slug itself is the capability.
+    via_qs = f"?via={via_share_id}" if via_share_id else (
+        f"?via_slug={via_slug}" if via_slug else ""
+    )
     if should_embed_full(None, _duration, _size):
         embed_video_url = f"{BASE_DOMAIN}{media_base}/full.mp4{via_qs}"
     else:
@@ -120,6 +123,7 @@ async def _render_video_page(request, db, stash_video_id, override, slug_for_con
         canonical_url=canonical_url,
         verify_action=f"{verify_action_prefix}/{slug_for_context}/verify" if verify_action_prefix else f"/{slug_for_context}/verify",
         via_share_id=via_share_id,
+        via_slug=via_slug,
     )
     return HTMLResponse(render("video-player.html", **context))
 

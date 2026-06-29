@@ -20,7 +20,9 @@ router = APIRouter()
 
 @router.api_route("/embed/{sqid}", methods=["GET", "HEAD"],
                   response_class=HTMLResponse, response_model=None)
-async def embed_player(sqid: str, request: Request = None, db: Session = Depends(get_db)):
+async def embed_player(sqid: str, request: Request = None,
+                       via: str | None = None, via_slug: str | None = None,
+                       db: Session = Depends(get_db)):
     """Bare, full-bleed player page (no site chrome) for iframe embeds such as
     Mastodon's twitter:player. The route parameter is the video's Hashid (Sqids
     encoding); decoded to a Stash scene id before access-checking.
@@ -32,15 +34,16 @@ async def embed_player(sqid: str, request: Request = None, db: Session = Depends
     if sid is None:
         raise HTTPException(status_code=404, detail="Video not found")
 
-    await access.authorize_scene_media(request, sid)
+    await access.authorize_scene_media(request, sid, via_share_id=via, via_slug=via_slug)
 
     video_name = "Video"
     details = await get_video_details(sid)
     if details and details.get("title"):
         video_name = details["title"]
 
-    # Pass the Hashid (not the Stash id) so template URLs are non-sequential.
-    html = render("video-embed.html", hashid=sqid, video_name=video_name)
+    # Pass the Hashid (not the Stash id) so template URLs are non-sequential,
+    # along with any gallery/slug capability context for media URLs.
+    html = render("video-embed.html", hashid=sqid, video_name=video_name, via_share_id=via, via_slug=via_slug)
     return HTMLResponse(html)
 
 

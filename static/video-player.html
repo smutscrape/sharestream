@@ -10,7 +10,7 @@
        URL (/v/{slug}, vanity or Sqids) is resolved server-side and passed in.
        We NEVER expose the raw stash_video_id in any URL or meta tag. #}
     {% set media_base = '/media/' + hashid|string %}
-    {% set via_qs = ('?via=' ~ via_share_id) if via_share_id else '' %}
+    {% set via_qs = ('?via=' ~ via_share_id) if via_share_id else (('?via_slug=' ~ via_slug) if via_slug else '') %}
     {% set page_url  = canonical_url %}
     {% set video_url = base_domain + media_base + '/stream.mp4' ~ via_qs %}
     {% set image_url = base_domain + media_base + '/thumb' ~ via_qs %}
@@ -27,7 +27,7 @@
 
     {# Bare player page (no site chrome) for iframe embeds, e.g. Mastodon's
        twitter:player, keyed to the Hashid (never the sequential stash id). #}
-    {% set embed_url = base_domain + '/embed/' + hashid|string %}
+    {% set embed_url = base_domain + '/embed/' + hashid|string + via_qs %}
 
     {# Try to parse "WxH" from video_details.resolution; fall back to 1280x720 #}
     {% set og_w = 1280 %}
@@ -78,7 +78,7 @@
     <meta name="twitter:image"             content="{{ image_url }}">
 
     {# Google Video SEO: Schema.org VideoObject structured data #}
-    {% set is_public = not via_share_id %}
+    {% set is_public = (not via_share_id and not via_slug) %}
     {% if video_details and video_details.duration %}
         {% set total_seconds = video_details.duration | round | int %}
         {% set hours = (total_seconds // 3600) %}
