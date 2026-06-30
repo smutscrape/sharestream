@@ -36,7 +36,7 @@ from sharestream.routers.pages import get_home_page_context
 from sharestream.services.access import tag_share_respects_limit_tag
 from sharestream.services.cache import prime_tag_membership
 from sharestream.services.hits import get_total_plays_map
-from sharestream.services.slugs import canonical_video_slugs
+from sharestream.services.slugs import canonical_video_slugs, encode_video_id
 from sharestream.services.thumbnails import fetch_and_cache_thumbnail
 
 logger = logging.getLogger(__name__)
@@ -196,23 +196,26 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
     tag_video_results = await asyncio.gather(
         *(get_videos_by_tag(tag.stash_tag_id) for tag in tag_shares)
     ) if tag_shares else []
-    # Resolve slugs for collection-tag media URLs up front so cards use the
+    # Resolve scene Sqids for collection-tag media URLs up front so cards use the
     # Hashid (non-sequential) — never the raw stash_video_id — in thumb/preview URLs.
     _tag_card_vids = set()
     for _t, (tag_videos, _tc) in zip(tag_shares, tag_video_results):
         for _v in (tag_videos or []):
             _tag_card_vids.add(int(_v["id"]))
-    _tag_card_slugs = canonical_video_slugs(db, _tag_card_vids) if _tag_card_vids else {}
+    _tag_card_sqids = {vid: encode_video_id(vid) for vid in _tag_card_vids} if _tag_card_vids else {}
 
     for tag, (tag_videos, total_count) in zip(tag_shares, tag_video_results):
         if tag_videos:
             first_video = tag_videos[0]
             _first_id = int(first_video["id"])
-            _first_sqid = _tag_card_slugs.get(_first_id, str(_first_id))
+            _first_sqid = _tag_card_sqids.get(_first_id, str(_first_id))
             warm_coros.append(fetch_and_cache_thumbnail(str(_first_id), _first_id))
-            thumbnail_url = f"/media/{_first_sqid}/thumbnail.jpg"
+            thumbnail_url = f"/media/{_first_sqid}/thumbnail.jpg?via={tag.share_id}"
             sample = random.sample(tag_videos, min(len(tag_videos), 12))
-            preview_webps = [f"/media/{_tag_card_slugs.get(int(v['id']), int(v['id']))}/webp" for v in sample]
+            preview_webps = [
+                f"/media/{_tag_card_sqids.get(int(v['id']), int(v['id']))}/webp?via={tag.share_id}"
+                for v in sample
+            ]
             tag_cards.append({
                 "share_id": tag.share_id,
                 "tag_name": tag.tag_name,
@@ -237,16 +240,16 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
     public_ids = [int(v["id"]) for v in public_videos]
     total_plays = get_total_plays_map(db, public_ids)
 
-    # Resolve every PUBLIC scene's slug up front so all generated URLs —
-    # preview, thumbnail, share link Hashid, never the sequential id.
-    slug_map = canonical_video_slugs(db, public_ids)
+    # Resolve every PUBLIC scene's Sqid up front so all generated media and /v/
+    # URLs stay scene-keyed, regardless of any individual-share vanity slug.
+    sqid_map = {vid: encode_video_id(vid) for vid in public_ids}
 
     # 3. Build a card per public-tagged scene. All generated media URLs use the
-    # slug from slug_map; the stash id is tracked internally for sort/filter.
+    # Sqid from sqid_map; the stash id is tracked internally for sort/filter.
     all_video_cards = []
     for video in public_videos:
         vid = int(video["id"])
-        vid_sqid = slug_map.get(vid, str(vid))
+        vid_sqid = sqid_map.get(vid, str(vid))
         all_video_cards.append({
             "video_name": video.get("title"),
             "preview_url": f"/media/{vid_sqid}/webp",
@@ -284,10 +287,10 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
     start = (page - 1) * per_page
     all_video_cards = all_video_cards[start:start + per_page]
 
-    # Fill canonical /v/ link and thumbnail URL (now keyed to the slug).
+    # Fill /v/ link and thumbnail URL (both keyed to the scene Sqid).
     for card in all_video_cards:
-        card['share_url'] = f"/v/{slug_map[int(card['stash_video_id'])]}"
-        sqid = slug_map[int(card['stash_video_id'])]
+        card['share_url'] = f"/v/{sqid_map[int(card['stash_video_id'])]}"
+        sqid = sqid_map[int(card['stash_video_id'])]
         card['thumbnail_url'] = f"/media/{sqid}/thumbnail.jpg"
         warm_coros.append(fetch_and_cache_thumbnail(str(int(card['stash_video_id'])),
                                                    int(card['stash_video_id'])))
@@ -322,13 +325,10 @@ async def build_home_context(db: Session, request, sort: str = 'date', page: int
 async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id: str,
                                     page: int = 1, sort: str = 'date', request=None) -> dict:
     """Assemble the paginated gallery context for a single tag share's page."""
-    # Set pagination parameters
-    per_page = GALLERY_PER_PAGE  # videos per page
-    # Ensure page is at least 1
+    per_page = GALLERY_PER_PAGE
     if page < 1:
         page = 1
 
-    # Get videos for this tag with pagination
     videos = []
     total_count = 0
 
@@ -339,53 +339,30 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
                                                  tag_share.show_in_gallery,
                                                  tag_share.apply_limit_tag)
 
-    # Visibility filter for this surface. Hidden scenes are ALWAYS excluded
-    # from gallery listings (no surface shows them). Password-protected shares
-    # may include unlisted scenes; no-password shares may not. ## HEADMASTER CHANGE 6/27 - REVISIT AFTER TESTING
-
+    # Visibility filter for this surface. Hidden scenes are ALWAYS excluded.
+    # Current behavior: both password-protected and no-password galleries may
+    # include unlisted scenes; only hidden is excluded.
     is_locked = bool(tag_share.password_hash)
     if is_locked:
-        # Password-protected share: include everything except hidden.
         def _pass_visibility(v):
             return v.get("_visibility") != "hidden"
     else:
-        # No-password share: include everything except hidden.
         def _pass_visibility(v):
-            return v.get("_visibility") != "hidden" ## HEADMASTER CHANGE 6/27 - REVISIT AFTER TESTING
+            return v.get("_visibility") != "hidden"
 
-
-    # Aggregate play counts per Stash scene (across every share context), so a
-    # video's count matches the home page and its own video page. Populated once
-    # the scene ids are known below.
     total_plays: dict[int, int] = {}
 
     if sort == 'random':
-        # Let Stash handle random sort, paginating via Stash. We can't know
-        # which scenes will pass the visibility filter without fetching them all,
-        # so we filter the returned page and accept that random pagination is
-        # approximate (the total count may include scenes that would be
-        # excluded — this only affects the "Page N of M" display, not
-        # correctness of what's shown).
         _, total_count = await get_videos_by_tag(tag_share.stash_tag_id, per_page=1,
-                                                 respect_limit_tag=respect_limit)  # get total count
+                                                 respect_limit_tag=respect_limit)
         videos, _ = await get_videos_by_tag(tag_share.stash_tag_id, page=page, per_page=per_page,
                                             sort_by='random', respect_limit_tag=respect_limit)
-        # Apply visibility filter AFTER pagination so the random page reflects
-        # the same visibility rules the gallery uses.
         videos = [v for v in videos if _pass_visibility(v)]
         total_plays = get_total_plays_map(db, [int(v["id"]) for v in videos])
     else:
-        # Fetch all, then sort in Python and paginate. This keeps Title a
-        # normal A→Z sort and Date a release-date sort (with a created_at
-        # fallback) — consistent with the home page.
         all_videos_raw = await get_all_videos_by_tag(tag_share.stash_tag_id,
                                                      respect_limit_tag=respect_limit)
-        # Apply visibility filter BEFORE pagination so page boundaries are
-        # correct (excluded scenes don't count toward the total).
         all_videos_raw = [v for v in all_videos_raw if _pass_visibility(v)]
-        # We just fetched the tag's COMPLETE contents — seed the membership cache
-        # so this page's own (access-gated) thumbnail sub-requests hit it warm
-        # instead of each re-probing Stash.
         prime_tag_membership(tag_share.stash_tag_id,
                              (int(v["id"]) for v in all_videos_raw),
                              respect_limit_tag=respect_limit)
@@ -398,25 +375,19 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
         start = (page - 1) * per_page
         videos = all_videos_raw[start:start + per_page]
 
-    # Calculate pagination info
-    total_pages = (total_count + per_page - 1) // per_page  # Ceiling division
+    total_pages = (total_count + per_page - 1) // per_page
     has_more_pages = page < total_pages
 
-    # Transform videos for gallery display with proxied thumbnails. Warm the
-    # first 20 screenshots concurrently (the rest lazy-load); either way the URL
-    # is the access-gated route (so a protected tag's thumbnails stay behind its
-    # password), never /static.
-    #
-    # Every media URL carries ?via=<share_id> so the /media/{sqid}/... routes
-    # authorize against this specific tag share (O(1) lookup) instead of
-    # requiring a scene-keyed cookie the gallery page never sets. Without this,
-    # password-protected gallery thumbnails/previews fail auth.
-    slug_map = canonical_video_slugs(db, [int(v["id"]) for v in videos])
+    # IMPORTANT: gallery-scoped URLs must always use the scene Sqid, never a
+    # vanity/canonical slug. Otherwise a VideoOverride on a scene breaks the
+    # gallery card URL and its media URLs.
+    sqid_map = {int(v["id"]): encode_video_id(int(v["id"])) for v in videos}
+
     video_cards = []
     warm_coros = []
     for i, video in enumerate(videos):
         vid = int(video["id"])
-        sqid = slug_map.get(vid, str(vid))
+        sqid = sqid_map[vid]
         thumb_route = f"/media/{sqid}/thumbnail.jpg?via={share_id}"
         preview_route = f"/media/{sqid}/webp?via={share_id}"
         eager = i < 20
@@ -425,7 +396,6 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
 
         video_cards.append({
             "video_name": video["title"],
-            # Gallery-scoped video URL: /{gallery_slug}/{sqid}
             "share_url": f"/{share_id}/{sqid}",
             "preview_url": preview_route,
             "thumbnail_url": thumb_route if eager else "/static/default_thumbnail.jpg",
@@ -437,8 +407,6 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
 
     await _warm_thumbnails(warm_coros)
 
-    # Prefer the tag's own Stash description for og:description (falls through to
-    # site_description/site_motto in the template when the tag has none).
     tag_description = await get_tag_description(tag_share.stash_tag_id)
 
     context = site_context(request)
@@ -454,7 +422,6 @@ async def build_tag_gallery_context(db: Session, tag_share: SharedTag, share_id:
         total_videos_label=format_count(total_count),
         sort=sort,
         gallery_mode=bool(tag_share.gallery_mode),
-        # Social-embed: this share's negotiated collection thumbnail.
         collection_share_id=share_id,
         og_title=f"{tag_share.tag_name} ({format_count(total_count)} videos)",
         og_image=f"{BASE_DOMAIN}/tag/{share_id}/collection-thumb",
@@ -514,12 +481,12 @@ async def build_tag_name_gallery_context(db: Session, tag_name: str, request=Non
 
     # 6. Build cards directly from the filtered tag set. Warm the first 20
     # screenshots concurrently (the rest lazy-load).
-    slug_map = canonical_video_slugs(db, [int(v["id"]) for v in page_videos])
+    sqid_map = {int(v["id"]): encode_video_id(int(v["id"])) for v in page_videos}
     video_cards = []
     warm_coros = []
     for i, video in enumerate(page_videos):
         vid = int(video["id"])
-        sqid = slug_map.get(vid, str(vid))
+        sqid = sqid_map[vid]
         eager = i < 20
         if eager:
             warm_coros.append(fetch_and_cache_thumbnail(str(vid), vid))

@@ -51,7 +51,7 @@ from sharestream.services.access import (
 )
 from sharestream.services.galleries import format_duration, normalize_sort, parse_aspect, sort_video_dicts
 from sharestream.services.hits import get_total_plays_map
-from sharestream.services.slugs import canonical_video_slugs
+from sharestream.services.slugs import canonical_video_slugs, encode_video_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -441,7 +441,6 @@ async def search(
         effective_sort,
     )
 
-
 async def _search_in_gallery(
     request: Request,
     db: Session,
@@ -470,14 +469,9 @@ async def _search_in_gallery(
         tag_share.stash_tag_id, respect_limit_tag=respect_limit,
     )
 
-    # Apply the same visibility filter as the gallery page this search runs
-    # inside. Hidden scenes are always excluded. Password-protected shares may
-    # include unlisted scenes; no-password shares may not.
-    is_locked = bool(tag_share.password_hash)
-    if is_locked:
-        all_videos = [v for v in all_videos if v.get("_visibility") != "hidden"]
-    else:
-        all_videos = [v for v in all_videos if v.get("_visibility") in ("listed", "public")]
+    # Match the current gallery-page behavior: hidden scenes are always excluded;
+    # both password-protected and no-password galleries may include unlisted scenes.
+    all_videos = [v for v in all_videos if v.get("_visibility") != "hidden"]
 
     # Apply text query filter (title or description)
     if query:
@@ -514,11 +508,11 @@ async def _search_in_gallery(
 
     all_videos = all_videos[:500]
 
-    slug_map = canonical_video_slugs(db, [int(v["id"]) for v in all_videos])
+    sqid_map = {int(v["id"]): encode_video_id(int(v["id"])) for v in all_videos}
     results = []
     for v in all_videos:
         vid = int(v["id"])
-        sqid = slug_map.get(vid, str(vid))
+        sqid = sqid_map[vid]
         # Every media URL carries ?via=<share_id> so the /media/{sqid}/...
         # routes authorize against this specific tag share (O(1) lookup) —
         # without it, password-protected gallery search results fail auth.
@@ -543,7 +537,6 @@ async def _search_in_gallery(
         "studios": ",".join(str(s) for s in required_studio_ids) if required_studio_ids else None,
         "sort": sort, "total": len(results),
     }
-
 
 async def _search_global(
     db: Session,
@@ -597,11 +590,11 @@ async def _search_global(
     sort_video_dicts(matched, sort)
     matched = matched[:200]
 
-    slug_map = canonical_video_slugs(db, [int(v["id"]) for v in matched])
+    sqid_map = {int(v["id"]): encode_video_id(int(v["id"])) for v in matched}
     results = []
     for v in matched:
         vid = int(v["id"])
-        sqid = slug_map.get(vid, str(vid))
+        sqid = sqid_map[vid]
         results.append({
             "stash_video_id": vid,
             "video_name": v.get("title") or "Untitled",

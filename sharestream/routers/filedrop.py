@@ -43,19 +43,11 @@ from sharestream.backends.stash import add_tags_to_scene, update_scene_metadata
 from sharestream.core.branding import site_context
 from sharestream.core.security import pwd_context
 from sharestream.core.templates import render
-from sharestream.db.models import SharedVideo
 from sharestream.db.session import get_db
 from sharestream.services import access
-from sharestream.services.filedrop import (
-    find_public_view_share,
-    get_public_tag_vocabulary,
-    local_put,
-    sanitize_filename,
-    sftp_put,
-    trigger_scan_and_tag,
-)
-from sharestream.services.media_proxy import generate_m3u8_file
-from sharestream.services.slugs import generate_share_id, canonical_video_slug
+from sharestream.services.filedrop import find_public_view_share, get_public_tag_vocabulary, local_put, sanitize_filename, sftp_put, trigger_scan_and_tag
+
+from sharestream.services.slugs import canonical_video_slug, encode_video_id
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +245,72 @@ async def filedrop_tags(request: Request, db: Session = Depends(get_db)):
     return JSONResponse({"tags": await get_public_tag_vocabulary(db)})
 
 
+def _mint_filedrop_override_slug(db: Session, length: int = 10) -> str:
+    """Generate a unique vanity slug for a filedrop auto-share.
+
+    This mirrors the modern individual-share model: the upload gets a real
+    VideoOverride-backed /{slug} URL instead of a legacy SharedVideo short URL
+    that 301s to /v/{sqid} and drops the password flow.
+    """
+    from sharestream.db.models import SharedTag, SharedVideo, VideoOverride
+    from sharestream.services.slugs import RESERVED_SLUGS, markdown_page_slug_taken
+
+    alphabet = "abcdefghijkmnpqrstuvwxyz23456789"
+    for _ in range(100):
+        slug = "u" + "".join(secrets.choice(alphabet) for _ in range(length - 1))
+        if slug in RESERVED_SLUGS or markdown_page_slug_taken(slug):
+            continue
+        if db.query(VideoOverride).filter(VideoOverride.vanity_slug == slug).first():
+            continue
+        if db.query(SharedTag).filter(SharedTag.share_id == slug).first():
+            continue
+        if db.query(SharedVideo).filter(SharedVideo.share_id == slug).first():
+            continue
+        return slug
+    raise HTTPException(status_code=500, detail="Failed to generate a unique share slug")
+
+
+def _create_filedrop_override_share(db: Session, scene_id: int) -> tuple[str, str]:
+    """Create/update the modern password-protected individual share for an upload.
+
+    Returns ``(share_url, plaintext_password)``.
+    """
+    from sharestream.db.models import VideoOverride
+
+    password = secrets.token_urlsafe(9)
+    expires_at = datetime.datetime.now(timezone.utc) + datetime.timedelta(days=_AUTO_SHARE_DAYS)
+
+    override = db.query(VideoOverride).filter(
+        VideoOverride.stash_video_id == int(scene_id)
+    ).first()
+
+    if override is None:
+        override = VideoOverride(
+            stash_video_id=int(scene_id),
+            vanity_slug=_mint_filedrop_override_slug(db),
+            password_hash=pwd_context.hash(password),
+            expires_at=expires_at,
+        )
+        db.add(override)
+    else:
+        # Reuse the existing slug if one already exists for this scene so old
+        # links fail by password rotation rather than by changing the path.
+        if not override.vanity_slug:
+            override.vanity_slug = _mint_filedrop_override_slug(db)
+        override.password_hash = pwd_context.hash(password)
+        override.expires_at = expires_at
+
+    db.commit()
+    db.refresh(override)
+
+    logger.info(
+        "Filedrop auto-share (override): vanity_slug=%s, stash_video_id=%s",
+        override.vanity_slug,
+        scene_id,
+    )
+    return f"{BASE_DOMAIN}/{override.vanity_slug}?pwd={password}", password
+
+
 @router.post("/filedrop/details")
 async def filedrop_details(request: Request, scene_id: int = Form(...),
                            title: str = Form(""), description: str = Form(""),
@@ -264,7 +322,8 @@ async def filedrop_details(request: Request, scene_id: int = Form(...),
 
     The upload starts on drop (title defaulted to the filename); this lets the
     uploader refine title/description and pick tags without re-uploading. Blank
-    title/description fields are left unchanged on Stash."""
+    title/description fields are left unchanged on Stash.
+    """
     _require_enabled()
     if not access.filedrop_access_ok(request, FILEDROP_PASSWORD):
         raise HTTPException(status_code=403, detail="Password required")
@@ -293,36 +352,22 @@ async def filedrop_details(request: Request, scene_id: int = Form(...),
 
     result = {"scene_id": scene_id, "saved": True, "published": False,
               "view_url": None, "share_url": None, "password": None}
-    
+
     # 1. Already publicly viewable via a no-password tag share?
     public_share = find_public_view_share(db, assigned)
     if public_share is not None:
+        sqid = encode_video_id(scene_id)
         result["published"] = True
-        slug = canonical_video_slug(db, scene_id)
-        result["view_url"] = f"{BASE_DOMAIN}/{public_share.share_id}/{slug}"
+        result["view_url"] = f"{BASE_DOMAIN}/{public_share.share_id}/{sqid}"
         return JSONResponse(result)
 
     # 2. Otherwise optionally mint a password-protected per-upload share link.
+    # Use the modern VideoOverride-backed individual share path, not legacy
+    # SharedVideo rows (which short_urls now 301 to /v/{sqid} and lose the
+    # password flow).
     if FILEDROP_AUTO_SHARE:
-        password = secrets.token_urlsafe(9)
-        share_id = generate_share_id()
-        expires_at = datetime.datetime.now(timezone.utc) + datetime.timedelta(days=_AUTO_SHARE_DAYS)
-        shared = SharedVideo(
-            share_id=share_id,
-            video_name=title.strip() or f"Scene {scene_id}",
-            stash_video_id=scene_id,
-            expires_at=expires_at,
-            hits=0,
-            resolution=DEFAULT_RESOLUTION,
-            password_hash=pwd_context.hash(password),
-            show_in_gallery=False,
-        )
-        db.add(shared)
-        db.commit()
-        if not await generate_m3u8_file(share_id, scene_id, DEFAULT_RESOLUTION):
-            logger.error(f"Filedrop auto-share m3u8 generation failed for scene {scene_id}")
-            # Keep the share row; playback will regenerate on demand if possible.
-        result["share_url"] = f"{BASE_DOMAIN}/{share_id}?pwd={password}"
+        share_url, password = _create_filedrop_override_share(db, scene_id)
+        result["share_url"] = share_url
         result["password"] = password
 
     return JSONResponse(result)
@@ -517,10 +562,9 @@ async def filedrop_scrape_progress(request: Request, job_id: str = Query(...)):
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
-
 @router.post("/filedrop/scrape/complete")
 async def filedrop_scrape_complete(request: Request, body: ScrapeCompleteRequest,
-                                    db: Session = Depends(get_db)):
+                                   db: Session = Depends(get_db)):
     """Finalize a scrape download: apply metadata overrides to the Stash scene
     and optionally mint an auto-share link (same logic as filedrop_details)."""
     _require_enabled()
@@ -558,31 +602,15 @@ async def filedrop_scrape_complete(request: Request, body: ScrapeCompleteRequest
     # 1. Already publicly viewable via a no-password tag share?
     public_share = find_public_view_share(db, assigned)
     if public_share is not None:
+        sqid = encode_video_id(scene_id)
         result["published"] = True
-        slug = canonical_video_slug(db, scene_id)
-        result["view_url"] = f"{BASE_DOMAIN}/{public_share.share_id}/{slug}"
+        result["view_url"] = f"{BASE_DOMAIN}/{public_share.share_id}/{sqid}"
         return JSONResponse(result)
 
     # 2. Otherwise optionally mint a password-protected per-upload share link.
     if FILEDROP_AUTO_SHARE:
-        password = secrets.token_urlsafe(9)
-        share_id = generate_share_id()
-        expires_at = datetime.datetime.now(timezone.utc) + datetime.timedelta(days=_AUTO_SHARE_DAYS)
-        shared = SharedVideo(
-            share_id=share_id,
-            video_name=title or f"Scene {scene_id}",
-            stash_video_id=scene_id,
-            expires_at=expires_at,
-            hits=0,
-            resolution=DEFAULT_RESOLUTION,
-            password_hash=pwd_context.hash(password),
-            show_in_gallery=False,
-        )
-        db.add(shared)
-        db.commit()
-        if not await generate_m3u8_file(share_id, scene_id, DEFAULT_RESOLUTION):
-            logger.error(f"Scrape complete: auto-share m3u8 generation failed for scene {scene_id}")
-        result["share_url"] = f"{BASE_DOMAIN}/{share_id}?pwd={password}"
+        share_url, password = _create_filedrop_override_share(db, scene_id)
+        result["share_url"] = share_url
         result["password"] = password
 
     return JSONResponse(result)
