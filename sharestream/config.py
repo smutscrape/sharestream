@@ -222,6 +222,10 @@ except (TypeError, ValueError):
 # API token for Bearer auth (leave empty when smutscrape auth is disabled).
 SMUTSCRAPE_URL = str(FILEDROP_CONFIG.get('smutscrape_url', '') or '').rstrip('/')
 SMUTSCRAPE_API_TOKEN = str(FILEDROP_CONFIG.get('smutscrape_api_token', '') or '')
+# When filedrop itself is enabled, the scrape (smutscrape) half can be toggled
+# independently. Defaults to true so existing configs keep scrape working;
+# operators who want upload-only filedrop set `filedrop.scrape_enabled: false`.
+FILEDROP_SCRAPE_ENABLED = FILEDROP_ENABLED and bool(FILEDROP_CONFIG.get('scrape_enabled', True))
 
 # Accepted upload extensions (lowercase, with dot).
 FILEDROP_ALLOWED_EXTS = {

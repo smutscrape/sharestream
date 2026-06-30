@@ -5,8 +5,13 @@ SFTP'd into a folder Stash watches, then scanned and (optionally) tagged. See
 ``services.filedrop`` for the delivery/scan logic and ``backends.stash`` for the
 GraphQL mutations.
 
-The whole feature is gated on ``FILEDROP_ENABLED``; every route 404s when it's
-off, so the routes simply don't exist for an operator who hasn't opted in.
+The whole feature is gated on ``FILEDROP_ENABLED``. When it's off the module
+exports ``router = None`` and ``main`` skips including it, so NO /filedrop*
+routes are registered at all — the page, the upload form, the scrape proxy, and
+every sub-route simply don't exist for an operator who hasn't opted in (a request
+to /filedrop falls through to the catch-all 404 instead of a feature-specific
+404). This is a stronger guarantee than per-route 404s: the routes aren't even
+in the routing table, so they can't be discovered via the OpenAPI schema either.
 """
 from __future__ import annotations
 
@@ -35,6 +40,7 @@ from sharestream.config import (
     FILEDROP_MAX_UPLOAD_MB,
     FILEDROP_NEW_UPLOAD_TAGS,
     FILEDROP_PASSWORD,
+    FILEDROP_SCRAPE_ENABLED,
     SMUTSCRAPE_API_TOKEN,
     SMUTSCRAPE_URL,
 )
@@ -51,6 +57,11 @@ from sharestream.services.slugs import canonical_video_slug, encode_video_id
 
 logger = logging.getLogger(__name__)
 
+# When filedrop is disabled in config, ``main`` skips including this router
+# entirely — no /filedrop* routes are registered, the feature is fully absent
+# from the routing table and OpenAPI schema. The router object itself is always
+# created so the decorators don't crash at import time; the per-route
+# ``_require_enabled()`` calls serve as a defense-in-depth gate.
 router = APIRouter()
 
 _CHUNK = 1024 * 1024  # 1 MiB streaming chunk
@@ -128,6 +139,11 @@ def _require_enabled():
         raise HTTPException(status_code=404, detail="Not found")
 
 
+def _require_scrape_enabled():
+    if not FILEDROP_SCRAPE_ENABLED:
+        raise HTTPException(status_code=404, detail="Not found")
+
+
 @router.get("/filedrop", response_class=HTMLResponse, response_model=None)
 async def filedrop_page(request: Request):
     """Render the upload page, or a password prompt when locked."""
@@ -139,6 +155,7 @@ async def filedrop_page(request: Request):
         max_upload_mb=FILEDROP_MAX_UPLOAD_MB,
         allowed_exts=sorted(FILEDROP_ALLOWED_EXTS),
         allow_user_tags=FILEDROP_ALLOW_USER_TAGS,
+        scrape_enabled=FILEDROP_SCRAPE_ENABLED,
         error_message=None,
     )
     return HTMLResponse(render("filedrop.html", **context))
@@ -158,6 +175,7 @@ async def filedrop_verify(request: Request, password: str = Form(...)):
         max_upload_mb=FILEDROP_MAX_UPLOAD_MB,
         allowed_exts=sorted(FILEDROP_ALLOWED_EXTS),
         allow_user_tags=FILEDROP_ALLOW_USER_TAGS,
+        scrape_enabled=FILEDROP_SCRAPE_ENABLED,
         error_message="Incorrect password. Please try again.",
     )
     return HTMLResponse(render("filedrop.html", **context), status_code=401)
@@ -381,6 +399,7 @@ async def filedrop_scrape_fetch(request: Request, body: ScrapeFetchRequest):
 
     Returns structured metadata the frontend uses to pre-populate the edit form."""
     _require_enabled()
+    _require_scrape_enabled()
     if not access.filedrop_access_ok(request, FILEDROP_PASSWORD):
         raise HTTPException(status_code=403, detail="Password required")
     if not SMUTSCRAPE_URL:
@@ -427,6 +446,7 @@ async def filedrop_scrape_start(request: Request, body: ScrapeStartRequest,
     The metadata_overrides are stored in-memory and applied to the Stash scene
     after the download completes (see /filedrop/scrape/complete)."""
     _require_enabled()
+    _require_scrape_enabled()
     if not access.filedrop_access_ok(request, FILEDROP_PASSWORD):
         raise HTTPException(status_code=403, detail="Password required")
     if not SMUTSCRAPE_URL:
@@ -489,6 +509,7 @@ async def filedrop_scrape_progress(request: Request, job_id: str = Query(...)):
     into the frontend's expected format, and yields SSE events. The stream closes
     when the job reaches a terminal status (completed/failed) or times out."""
     _require_enabled()
+    _require_scrape_enabled()
     if not access.filedrop_access_ok(request, FILEDROP_PASSWORD):
         raise HTTPException(status_code=403, detail="Password required")
     if not SMUTSCRAPE_URL:
@@ -565,6 +586,7 @@ async def filedrop_scrape_complete(request: Request, body: ScrapeCompleteRequest
     """Finalize a scrape download: apply metadata overrides to the Stash scene
     and optionally mint an auto-share link (same logic as filedrop_details)."""
     _require_enabled()
+    _require_scrape_enabled()
     if not access.filedrop_access_ok(request, FILEDROP_PASSWORD):
         raise HTTPException(status_code=403, detail="Password required")
 

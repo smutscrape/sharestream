@@ -218,7 +218,9 @@
         <div class="admin-section filedrop-section">
             <div class="filedrop-tabs">
                 <button class="filedrop-tab active" data-tab="upload">Upload</button>
+                {% if scrape_enabled %}
                 <button class="filedrop-tab" data-tab="scrape">Scrape</button>
+                {% endif %}
             </div>
 
             <!-- Upload tab -->
@@ -235,6 +237,7 @@
             </div>
 
             <!-- Scrape tab -->
+            {% if scrape_enabled %}
             <div class="filedrop-tab-content" id="tab-scrape" style="display:none;">
                 <h2>Scrape Video</h2>
                 <p style="color:#c8b3d4; margin-bottom:16px;">Enter a video URL to scrape its metadata, edit it, then download and ingest directly into the library.</p>
@@ -272,6 +275,7 @@
                     <div class="result-link" id="scrape-result" style="display:none;"></div>
                 </div>
             </div>
+            {% endif %}
         </div>
         {% endif %}
 
@@ -683,6 +687,7 @@
             }
 
             // ---- Scrape workflow ----
+            {% if scrape_enabled %}
             const scrapeUrlInput = document.getElementById('scrape-url');
             const scrapeFetchBtn = document.getElementById('scrape-fetch-btn');
             const scrapeFetchStatus = document.getElementById('scrape-fetch-status');
@@ -936,6 +941,7 @@
                         '<a href="' + data.share_url + '" target="_blank" rel="noopener">Your private link →</a>' + pwd;
                 }
             }
+            {% endif %}
         })();
     </script>
     {% endif %}

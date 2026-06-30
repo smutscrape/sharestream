@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse, Response
 
-from sharestream.config import LIMIT_TO_TAG
+from sharestream.config import FILEDROP_ENABLED, LIMIT_TO_TAG
 from sharestream.core.errors import register_error_handlers
 from sharestream.core.http_client import close_http_client
 from sharestream.db.migrations import run_migrations
@@ -114,7 +114,11 @@ def create_app() -> FastAPI:
     app.include_router(media.router)
     app.include_router(embeds.router)
     app.include_router(report.router)
-    app.include_router(filedrop.router)
+    # Filedrop is opt-in via `filedrop.enabled` in config.yaml. When disabled no
+    # /filedrop* routes are registered — the page, upload, scrape proxy, and every
+    # sub-route are absent from the routing table (and from the OpenAPI schema).
+    if FILEDROP_ENABLED:
+        app.include_router(filedrop.router)
     app.include_router(pages.router)
     app.include_router(public.router)
     app.include_router(search.router)
