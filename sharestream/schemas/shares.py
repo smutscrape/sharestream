@@ -7,7 +7,7 @@ from sharestream.db.models import Resolution
 
 
 class ShareVideoRequest(BaseModel):
-    video_name: str
+    video_name: str | None = None
     stash_video_id: int
     days_valid: int = 7
     resolution: Resolution = Field(default=Resolution[DEFAULT_RESOLUTION], description="Streaming resolution")

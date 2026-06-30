@@ -64,7 +64,9 @@ def _resolve_slug(db: Session, slug: str) -> tuple[int, VideoOverride | None] | 
 # ---------------------------------------------------------------------------
 async def _render_video_page(request, db, stash_video_id, override, slug_for_context,
                               verify_action_prefix="/v", page_slug=None,
-                              via_share_id=None, via_slug=None):
+                              via_share_id=None, via_slug=None,
+                              custom_title: str | None = None):
+
     """Build the ``video-player.html`` response for a scene cleared for playback.
 
     The template receives the Hashid slug (``hashid`` == vanity slug or Sqids
@@ -85,7 +87,12 @@ async def _render_video_page(request, db, stash_video_id, override, slug_for_con
     # embeds, and the password-verification flow do NOT reach here — they are
     # handled by separate routes that never call _render_video_page.
     increment_scene_view(db, stash_video_id)
+
     video_details = await get_video_details(stash_video_id) or {}
+    if custom_title:
+        video_details = dict(video_details)
+        video_details["title"] = custom_title
+
     hit_count = get_total_plays(db, stash_video_id)
     hashid = slug_for_context
 
@@ -93,29 +100,31 @@ async def _render_video_page(request, db, stash_video_id, override, slug_for_con
     _size = _files[0].get("size") if _files else None
     _duration = (video_details or {}).get("duration")
     media_base = f"/media/{hashid}"
-    # Append ?via=<share_id> to the embed video URL when this video is being
-    # rendered inside a gallery share — so og:video / twitter:player:stream
-    # carry the share context needed for media authorization (otherwise a
-    # non-public scene would 403 for crawlers). Individual /{slug} shares carry
-    # ?via_slug=<slug> instead when the slug itself is the capability.
+
     via_qs = f"?via={via_share_id}" if via_share_id else (
         f"?via_slug={via_slug}" if via_slug else ""
     )
+
     if should_embed_full(None, _duration, _size):
         embed_video_url = f"{BASE_DOMAIN}{media_base}/full.mp4{via_qs}"
     else:
         embed_video_url = f"{BASE_DOMAIN}{media_base}/stream.mp4{via_qs}"
 
-    # Canonical URL = the URL the viewer is actually on.
-    # For /v/{slug} (global route) → /v/{slug}
-    # For /{slug} (individual share) → /{slug}
     if page_slug is not None:
         canonical_url = f"{BASE_DOMAIN}/{page_slug}"
     else:
         canonical_url = f"{BASE_DOMAIN}/v/{slug_for_context}"
+
+    display_title = (
+        custom_title
+        or video_details.get("title")
+        or ((_files[0].get("basename") if _files else None))
+        or "Video"
+    )
+
     context = site_context(request)
     context.update(
-        video_name=video_details.get("title") or "Video",
+        video_name=display_title,
         hashid=hashid,
         video_details=video_details,
         embed_video_url=embed_video_url,
@@ -126,7 +135,6 @@ async def _render_video_page(request, db, stash_video_id, override, slug_for_con
         via_slug=via_slug,
     )
     return HTMLResponse(render("video-player.html", **context))
-
 
 # ---------------------------------------------------------------------------
 # Global / stateless URL: /v/{slug}

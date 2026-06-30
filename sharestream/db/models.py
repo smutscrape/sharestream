@@ -52,8 +52,8 @@ class VideoOverride(Base):
     """Per-video exceptions to the default Hashid-routed, tag-governed behavior.
 
     A row exists ONLY for a scene that needs something Stash can't store: a
-    vanity slug and/or a password (with optional expiry). Most scenes have no
-    row and are reached purely by Hashid. Supersedes SharedVideo.
+    vanity slug and/or a password (with optional expiry), and now an optional
+    custom display title for individual-share pages/admin.
     """
     __tablename__ = "video_overrides"
     id = Column(Integer, primary_key=True)
@@ -61,6 +61,7 @@ class VideoOverride(Base):
     vanity_slug = Column(String, unique=True, index=True, nullable=True)
     password_hash = Column(String, nullable=True)
     expires_at = Column(DateTime(timezone=True), nullable=True)
+    custom_title = Column(String, nullable=True)
 
 
 class SceneViews(Base):

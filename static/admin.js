@@ -13,6 +13,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const logoutButton = document.getElementById('logout-button');
 
     const shareForm = document.getElementById('share-form');
+    const videoSearchInput = document.getElementById('video-search');
+    const videoSearchResults = document.getElementById('video-search-results');
     const stashIdInput = document.getElementById('stash-id');
     const videoNameInput = document.getElementById('video-name');
     const daysValidInput = document.getElementById('days-valid');
@@ -81,6 +83,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Store passwords for shares created in this session
     const sharePasswords = {};
+    let videoSearchTimer = null;
+    let latestVideoSearchRequest = 0;
+
 
     function showLogin() {
         loginSection.style.display = 'flex'; 
@@ -199,6 +204,66 @@ document.addEventListener('DOMContentLoaded', () => {
         div.appendChild(document.createTextNode(str));
         return div.innerHTML;
     }
+
+    function clearVideoSearchResults() {
+        if (!videoSearchResults) return;
+        videoSearchResults.innerHTML = '';
+        videoSearchResults.style.display = 'none';
+    }
+
+    function renderVideoSearchResults(matches) {
+        if (!videoSearchResults) return;
+
+        if (!matches || !matches.length) {
+            clearVideoSearchResults();
+            return;
+        }
+
+        videoSearchResults.innerHTML = matches.map(match => `
+            <button
+                type="button"
+                class="video-search-result"
+                data-id="${String(match.id)}"
+                data-title="${escapeHTML(match.title || '')}"
+            >
+                <span class="video-search-title">${escapeHTML(match.title || '')}</span>
+                <span class="video-search-id">#${String(match.id)}</span>
+            </button>
+        `).join('');
+
+        videoSearchResults.style.display = 'block';
+
+        videoSearchResults.querySelectorAll('.video-search-result').forEach(button => {
+            button.addEventListener('click', () => {
+                const stashId = button.getAttribute('data-id') || '';
+                const title = button.getAttribute('data-title') || '';
+
+                if (videoSearchInput) videoSearchInput.value = title;
+                if (stashIdInput) stashIdInput.value = stashId;
+
+                // Title override is optional now, so do NOT auto-fill videoNameInput.
+                clearVideoSearchResults();
+                shareError.textContent = '';
+            });
+        });
+    }
+
+    async function performVideoSearch(query) {
+        const requestId = ++latestVideoSearchRequest;
+
+        try {
+            const matches = await apiRequest(`/lookup_video_titles?q=${encodeURIComponent(query)}`);
+
+            // Ignore stale responses that returned after a newer keystroke.
+            if (requestId !== latestVideoSearchRequest) return;
+
+            renderVideoSearchResults(Array.isArray(matches) ? matches : []);
+        } catch (error) {
+            if (requestId !== latestVideoSearchRequest) return;
+            clearVideoSearchResults();
+        }
+    }
+
 
     function calculateDaysRemaining(expiresAt) {
         const now = new Date();
@@ -356,6 +421,36 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    if (videoSearchInput) {
+        videoSearchInput.addEventListener('input', () => {
+            const query = (videoSearchInput.value || '').trim();
+
+            clearTimeout(videoSearchTimer);
+
+            if (!query) {
+                clearVideoSearchResults();
+                return;
+            }
+
+            videoSearchTimer = setTimeout(() => {
+                performVideoSearch(query);
+            }, 200);
+        });
+
+        videoSearchInput.addEventListener('blur', () => {
+            setTimeout(() => {
+                clearVideoSearchResults();
+            }, 150);
+        });
+    }
+
+    document.addEventListener('click', (e) => {
+        if (!videoSearchInput || !videoSearchResults) return;
+        if (e.target === videoSearchInput) return;
+        if (videoSearchResults.contains(e.target)) return;
+        clearVideoSearchResults();
+    });
+
     if (lookupTitleButton) {
         lookupTitleButton.addEventListener('click', async () => {
             clearMessages();
@@ -364,26 +459,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 shareError.textContent = 'Please enter a Stash Video ID.';
                 return;
             }
-            
+
             logDebug('Looking up video title for ID:', stashId);
-            
+
             try {
                 const data = await apiRequest(`/get_video_title/${stashId}`);
                 if (data && data.title) {
-                    videoNameInput.value = data.title;
+                    if (videoSearchInput) videoSearchInput.value = data.title;
                     logDebug('Video title found:', data.title);
                 } else {
                     shareError.textContent = 'Could not find title for this ID.';
-                    videoNameInput.value = '';
+                    if (videoSearchInput) videoSearchInput.value = '';
                     logDebug('No title found for video ID:', stashId);
                 }
             } catch (error) {
                 shareError.textContent = `Error looking up title: ${error.message}`;
-                videoNameInput.value = '';
+                if (videoSearchInput) videoSearchInput.value = '';
                 logDebug('Error looking up video title:', error);
             }
         });
     }
+
 
     if (shareForm) {
         shareForm.addEventListener('submit', async (e) => {
@@ -392,7 +488,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
             let videoCustomShareId = null;
             if (videoShareIdTypeSelect && videoShareIdTypeSelect.value === 'custom') {
-                videoCustomShareId = (videoCustomShareIdInput.value || '').trim().toLowerCase().replace(/[^a-z0-9-_]/g, '-').replace(/-+/g, '-');
+                videoCustomShareId = (videoCustomShareIdInput.value || '')
+                    .trim()
+                    .toLowerCase()
+                    .replace(/[^a-z0-9-_]/g, '-')
+                    .replace(/-+/g, '-');
                 if (!videoCustomShareId) {
                     shareError.textContent = 'Please enter a custom share ID.';
                     return;
@@ -400,7 +500,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const shareData = {
-                video_name: videoNameInput.value,
+                video_name: (videoNameInput.value || '').trim() || null,
                 stash_video_id: parseInt(stashIdInput.value, 10),
                 days_valid: parseInt(daysValidInput.value, 10),
                 password: sharePasswordInput.value || null,
@@ -409,7 +509,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             logDebug('Sharing video with data:', shareData);
 
-            if (!shareData.video_name || isNaN(shareData.stash_video_id) || isNaN(shareData.days_valid)) {
+            if (isNaN(shareData.stash_video_id) || isNaN(shareData.days_valid)) {
                 shareError.textContent = 'Please fill in all required fields correctly.';
                 return;
             }
@@ -418,9 +518,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 const result = await apiRequest('/share', 'POST', shareData);
                 shareMessage.textContent = `Video shared successfully! URL: ${result.share_url}`;
                 shareForm.reset();
+                clearVideoSearchResults();
                 fetchSharedContent();
                 logDebug('Video shared successfully:', result);
-                // Store the password for this share
+
                 if (shareData.password) {
                     const shareId = result.share_url.split('/').pop().split('?')[0];
                     sharePasswords[shareId] = shareData.password;
@@ -431,6 +532,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
     
     if (lookupTagButton) {
         lookupTagButton.addEventListener('click', async () => {
@@ -572,8 +674,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderSharedVideos(videos) {
-        if(!sharedVideosTableBody) return;
+        if (!sharedVideosTableBody) return;
         sharedVideosTableBody.innerHTML = '';
+
         if (!videos || videos.length === 0) {
             sharedVideosTableBody.innerHTML = '<tr><td colspan="4">No videos shared yet.</td></tr>';
             return;
@@ -583,13 +686,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const row = document.createElement('tr');
             const relativeTime = getRelativeTime(video.expires_at);
             const shareUrl = video.share_url;
-            const displayName = truncateText(video.video_name, 30);
-            const fullName = video.video_name;
+            const displayName = truncateText(video.video_name || '', 30);
+            const fullName = video.video_name || '';
+            const customTitle = video.custom_title || '';
+            const sourceTitle = video.source_title || '';
 
-            // If the video has a password, append ?pwd=PASSWORD to the copy button's data-url
             let copyUrl = shareUrl;
             const shareId = video.share_id;
-            if (video.has_password && sharePasswords[shareId]) {
+            if (video.has_password && shareId && sharePasswords[shareId]) {
                 copyUrl += (shareUrl.includes('?') ? '&' : '?') + 'pwd=' + encodeURIComponent(sharePasswords[shareId]);
             }
 
@@ -599,13 +703,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${relativeTime}</td>
                 <td>
                     <button class="copy-button" data-url="${escapeHTML(copyUrl)}">Copy</button>
-                    <button class="edit-button" 
-                        data-share-id="${escapeHTML(video.share_id)}" 
-                        data-video-name="${escapeHTML(video.video_name)}" 
-                        data-days-valid="${calculateDaysRemaining(video.expires_at)}" 
-                        data-has-password="${video.has_password}" 
-                        data-stash-video-id="${escapeHTML(video.stash_video_id.toString())}">Edit</button>
-                    <button class="delete-button" data-share-id="${escapeHTML(video.share_id)}">Delete</button>
+                    <button class="edit-button"
+                        data-share-id="${escapeHTML(video.share_id || '')}"
+                        data-custom-title="${escapeHTML(customTitle)}"
+                        data-source-title="${escapeHTML(sourceTitle)}"
+                        data-days-valid="${calculateDaysRemaining(video.expires_at)}"
+                        data-has-password="${video.has_password}"
+                        data-stash-video-id="${escapeHTML(String(video.stash_video_id))}">Edit</button>
+                    <button class="delete-button" data-share-id="${escapeHTML(video.share_id || '')}">Delete</button>
                 </td>
             `;
             sharedVideosTableBody.appendChild(row);
@@ -613,6 +718,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         addVideoTableButtonListeners();
     }
+
 
     function renderSharedTags(tags) {
         if(!sharedTagsTableBody) return;
@@ -717,20 +823,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.querySelectorAll('#shared-videos-table .edit-button').forEach(button => {
             button.addEventListener('click', (e) => {
-                const shareId = e.target.getAttribute('data-share-id');
-                const videoName = e.target.getAttribute('data-video-name');
+                const shareId = e.target.getAttribute('data-share-id') || '';
+                const customTitle = e.target.getAttribute('data-custom-title') || '';
+                const sourceTitle = e.target.getAttribute('data-source-title') || '';
                 const daysValid = e.target.getAttribute('data-days-valid');
 
-                if(editShareIdInput) editShareIdInput.value = shareId;
-                if(editVideoNameInput) editVideoNameInput.value = videoName;
-                if(editDaysValidInput) editDaysValidInput.value = Math.max(1, parseInt(daysValid) || 7);
-                if(editSharePasswordInput) editSharePasswordInput.value = '';
-                if(editClearPasswordInput) editClearPasswordInput.checked = false;
-                
-                if(editModal) editModal.style.display = 'block';
+                if (editShareIdInput) editShareIdInput.value = shareId;
+                if (editVideoNameInput) {
+                    editVideoNameInput.value = customTitle;
+                    editVideoNameInput.placeholder = sourceTitle
+                        ? `Leave blank to use: ${sourceTitle}`
+                        : 'Leave blank to use the Stash title / filename';
+                }
+                if (editDaysValidInput) editDaysValidInput.value = Math.max(1, parseInt(daysValid) || 7);
+                if (editSharePasswordInput) editSharePasswordInput.value = '';
+                if (editClearPasswordInput) editClearPasswordInput.checked = false;
+
+                if (editModal) editModal.style.display = 'block';
                 clearMessages();
             });
         });
+
 
         document.querySelectorAll('#shared-videos-table .delete-button').forEach(button => {
             button.addEventListener('click', async (e) => {
@@ -807,12 +920,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const stashVideoId = editButton ? parseInt(editButton.getAttribute('data-stash-video-id')) : 0;
             
             const updatedData = {
-                video_name: editVideoNameInput.value,
-                stash_video_id: stashVideoId, 
+                video_name: (editVideoNameInput.value || '').trim() || null,
+                stash_video_id: stashVideoId,
                 days_valid: parseInt(editDaysValidInput.value, 10),
                 password: editSharePasswordInput.value || null,
                 clear_password: editClearPasswordInput ? editClearPasswordInput.checked : false
             };
+
 
             if (isNaN(updatedData.days_valid)) {
                 editError.textContent = 'Please enter a valid number of days.';

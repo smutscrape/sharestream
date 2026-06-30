@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Panel</title>
     <link rel="icon" type="image/x-icon" href="/static/localized/favicon.ico" onerror="this.onerror=null;this.href='/static/favicon.ico';">
-    <link rel="stylesheet" href="/static/styles.css">
-    <link rel="stylesheet" href="/static/admin.css">
+    <link rel="stylesheet" href="{{ asset('static/styles.css') }}">
+    <link rel="stylesheet" href="{{ asset('static/admin.css') }}">
     <link rel="stylesheet" href="/fonts.css">
 </head>
 <body>
@@ -58,24 +58,49 @@
                         <div class="tab-content" id="tab-content-share-video">
                             <h2>Share New Video</h2>
                             <form id="share-form" class="grid-form">
+                                <label for="video-search">Search Video Title</label>
+                                <div class="admin-autocomplete">
+                                    <input
+                                        type="text"
+                                        id="video-search"
+                                        autocomplete="off"
+                                        placeholder="Start typing a title..."
+                                    >
+                                    <div
+                                        id="video-search-results"
+                                        class="admin-autocomplete-results"
+                                    ></div>
+
+                                </div>
+
                                 <label for="stash-id">Stash Video ID</label>
                                 <div class="input-group">
                                     <input type="number" id="stash-id" required>
                                     <button type="button" id="lookup-title-button">Lookup</button>
                                 </div>
-                                <label for="video-name">Video Name</label>
-                                <input type="text" id="video-name" required>
+
+                                <label for="video-name">Title Override (optional)</label>
+                                <input
+                                    type="text"
+                                    id="video-name"
+                                    placeholder="Leave blank to use the Stash title / filename"
+                                >
+
                                 <label for="days-valid">Days Valid</label>
                                 <input type="number" id="days-valid" value="7" required>
+
                                 <label for="share-id-type-video">Share ID Type</label>
                                 <select id="share-id-type-video" required>
                                     <option value="random" selected>Random</option>
                                     <option value="custom">Custom</option>
                                 </select>
+
                                 <label for="custom-share-id-video" style="display: none;">Custom Share ID</label>
                                 <input type="text" id="custom-share-id-video" placeholder="e.g. clip" style="display: none;">
+
                                 <label for="share-password">Password (optional)</label>
                                 <input type="password" id="share-password" placeholder="Password">
+
                                 <button type="submit" style="grid-column: 1 / -1;">Share Video</button>
                             </form>
                             <p id="share-message" class="success-message"></p>
@@ -197,12 +222,20 @@
             <h3>Edit Share</h3>
             <form class="grid-form">
                 <input type="hidden" id="edit-share-id">
-                <label for="edit-video-name">Video Name</label>
-                <input type="text" id="edit-video-name" readonly style="opacity: 0.6;">
+
+                <label for="edit-video-name">Title Override (optional)</label>
+                <input
+                    type="text"
+                    id="edit-video-name"
+                    placeholder="Leave blank to use the Stash title / filename"
+                >
+
                 <label for="edit-days-valid">Days Valid</label>
                 <input type="number" id="edit-days-valid" required>
+
                 <label for="edit-share-password">Password (leave blank to keep)</label>
                 <input type="password" id="edit-share-password" placeholder="Password">
+
                 <div style="grid-column: 1 / -1; margin-top: 5px;">
                     <label class="checkbox-wrapper" style="margin-left: 16px;">
                         <input type="checkbox" id="edit-clear-password">
@@ -210,6 +243,7 @@
                         <span class="checkbox-label">Remove password</span>
                     </label>
                 </div>
+
                 <div class="modal-buttons">
                     <button type="button" id="save-edit-button">Save Changes</button>
                     <button type="button" id="cancel-edit-button">Cancel</button>
@@ -217,7 +251,6 @@
             </form>
             <p id="edit-error" class="error-message"></p>
         </div>
-
 
         <!-- Edit Tag Modal (Hidden by default) -->
         <div id="edit-tag-modal" style="display: none;">
@@ -286,6 +319,6 @@
         </div>
     </div>
 
-<script src="/static/admin.js"></script>
+<script src="{{ asset('static/admin.js') }}"></script>
 </body>
 </html>

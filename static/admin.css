@@ -765,4 +765,71 @@ body > .container {
 }
 
 
+/* Let the autocomplete dropdown escape the share form without being clipped */
+#share-pane,
+#tab-content-share-video,
+#share-form {
+    overflow: visible;
+}
 
+.admin-autocomplete {
+    grid-column: 1 / -1;
+    position: relative;
+    width: 100%;
+}
+
+.admin-autocomplete-results {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 50;
+    display: none;
+    max-height: 260px;
+    overflow-y: auto;
+    background: #1a0d26;
+    border: 1px solid rgba(255, 0, 128, 0.35);
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.video-search-result {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 0;
+    background: transparent;
+    color: #f0e6f5;
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    text-transform: none;
+    letter-spacing: normal;
+    box-shadow: none;
+    border-radius: 0;
+}
+
+.video-search-result::before {
+    display: none;
+}
+
+.video-search-result:hover,
+.video-search-result.active {
+    background: rgba(255, 0, 128, 0.16);
+    transform: none;
+    box-shadow: none;
+}
+
+.video-search-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.video-search-id {
+    flex: 0 0 auto;
+    opacity: 0.7;
+    font-size: 0.85rem;
+}

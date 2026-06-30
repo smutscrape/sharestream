@@ -21,7 +21,7 @@ from sharestream.schemas.shares import ShareVideoRequest
 from sharestream.services import access
 from sharestream.services.embed_policy import normalize_embed_mode
 from sharestream.services.media_proxy import generate_m3u8_file
-from sharestream.services.slugs import generate_share_id, validate_custom_share_id
+from sharestream.services.slugs import generate_share_id, validate_custom_share_id, encode_video_id, decode_video_id
 
 logger = logging.getLogger(__name__)
 
@@ -34,51 +34,64 @@ async def share_video(request: ShareVideoRequest,
                       db: Session = Depends(get_db)):
     """Create a share for a scene.
 
-    - Custom slug OR password → creates a ``VideoOverride``; returns the
-      individual-share URL ``/{slug}`` (the slug is the capability).
-    - Neither → returns the stateless ``/v/{sqid}`` URL; no DB row is created.
+    - Custom slug OR password OR title override → creates/updates a VideoOverride
+      and returns the individual-share URL ``/{slug}``.
+    - Otherwise → returns the stateless ``/v/{sqid}`` URL; no DB row is created.
     """
     expires_at = datetime.datetime.now(timezone.utc) + datetime.timedelta(days=request.days_valid)
+    title_override = (request.video_name or "").strip() or None
+
     try:
-        has_capability = bool(request.custom_share_id) or bool(request.password)
+        has_capability = bool(request.custom_share_id) or bool(request.password) or bool(title_override)
 
         if has_capability:
+            override = db.query(VideoOverride).filter(
+                VideoOverride.stash_video_id == request.stash_video_id
+            ).first()
+
             if request.custom_share_id:
                 vanity_slug = validate_custom_share_id(request.custom_share_id, db)
+            elif override and override.vanity_slug:
+                vanity_slug = override.vanity_slug
             else:
                 vanity_slug = _mint_unique_slug(db)
 
             password_hash = pwd_context.hash(request.password) if request.password else None
 
-            override = db.query(VideoOverride).filter(
-                VideoOverride.stash_video_id == request.stash_video_id).first()
             if override is not None:
                 override.vanity_slug = vanity_slug
                 override.password_hash = password_hash
                 override.expires_at = expires_at
+                override.custom_title = title_override
             else:
                 override = VideoOverride(
                     stash_video_id=request.stash_video_id,
                     vanity_slug=vanity_slug,
                     password_hash=password_hash,
                     expires_at=expires_at,
+                    custom_title=title_override,
                 )
                 db.add(override)
+
             db.commit()
 
-            logger.info(f"Video share (override): vanity_slug={vanity_slug}, "
-                        f"stash_video_id={request.stash_video_id}, "
-                        f"resolution={request.resolution}, has_password={bool(password_hash)}")
+            logger.info(
+                f"Video share (override): vanity_slug={vanity_slug}, "
+                f"stash_video_id={request.stash_video_id}, "
+                f"has_password={bool(password_hash)}, "
+                f"has_custom_title={bool(title_override)}"
+            )
+
             share_url = f"{BASE_DOMAIN}/{vanity_slug}"
             if request.password:
                 share_url += f"?pwd={request.password}"
+
             return {"share_url": share_url}
 
-        from sharestream.services.slugs import encode_video_id
         sqid = encode_video_id(request.stash_video_id)
-        logger.info(f"Video share (stateless): stash_video_id={request.stash_video_id}, "
-                    f"resolution={request.resolution}")
+        logger.info(f"Video share (stateless): stash_video_id={request.stash_video_id}")
         return {"share_url": f"{BASE_DOMAIN}/v/{sqid}"}
+
     except HTTPException:
         raise
     except Exception as e:
@@ -106,22 +119,25 @@ async def edit_share(share_id: str, request: ShareVideoRequest,
                      current_user: str = Depends(get_current_user),
                      db: Session = Depends(get_db)):
     try:
-        # Admin UI passes the vanity_slug as the share_id for VideoOverrides
         override = db.query(VideoOverride).filter(VideoOverride.vanity_slug == share_id).first()
         if not override:
             raise HTTPException(status_code=404, detail="Share link not found")
-            
-        # VideoOverride only tracks slug, password, and expiry.
+
+        title_override = (request.video_name or "").strip() or None
+
         override.expires_at = datetime.datetime.now(timezone.utc) + datetime.timedelta(days=request.days_valid)
+        override.custom_title = title_override
+
         if request.clear_password:
             override.password_hash = None
         elif request.password:
             override.password_hash = pwd_context.hash(request.password)
-        
+
         db.commit()
 
         logger.info(f"Share updated: share_id={share_id}")
         return {"message": "Share updated"}
+
     except HTTPException:
         raise
     except Exception as e:
@@ -134,15 +150,35 @@ async def delete_share(share_id: str,
                        current_user: str = Depends(get_current_user),
                        db: Session = Depends(get_db)):
     try:
-        override = db.query(VideoOverride).filter(VideoOverride.vanity_slug == share_id).first()
+        override = db.query(VideoOverride).filter(
+            VideoOverride.vanity_slug == share_id
+        ).first()
+
+        if not override:
+            sid = decode_video_id(share_id)
+            if sid is not None:
+                override = db.query(VideoOverride).filter(
+                    VideoOverride.stash_video_id == sid
+                ).first()
+
         if not override:
             raise HTTPException(status_code=404, detail="Share link not found")
-            
+
+        vanity_slug = override.vanity_slug
+
         db.delete(override)
         db.commit()
 
+        if vanity_slug:
+            for stale in SHARES_DIR.glob(f"slug-{vanity_slug}-*.m3u8"):
+                try:
+                    stale.unlink()
+                except OSError:
+                    pass
+
         logger.info(f"Share deleted: share_id={share_id}")
         return {"message": "Share deleted"}
+
     except HTTPException:
         raise
     except Exception as e:

@@ -984,3 +984,174 @@ async def metadata_generate(scene_ids: list[int]) -> str | None:
     except Exception as e:
         logger.error(f"Error starting metadata generate: {e}")
         return None
+
+async def get_scene_titles(scene_ids: list[int]) -> dict[int, str]:
+    if not scene_ids:
+        return {}
+
+    query = {
+        "operationName": "FindScenes",
+        "variables": {"scene_ids": scene_ids},
+        "query": """
+            query FindScenes($scene_ids: [Int!]) {
+                findScenes(scene_ids: $scene_ids) {
+                    scenes {
+                        id
+                        title
+                        files { basename }
+                    }
+                }
+            }
+        """,
+    }
+
+    try:
+        response = await http_client.post(GRAPHQL_URL, json=query, headers=_graphql_headers())
+        response.raise_for_status()
+        data = response.json()
+        if data.get("errors"):
+            logger.error(f"GraphQL error getting scene titles: {data['errors']}")
+            return {}
+
+        out = {}
+        for scene in data.get("data", {}).get("findScenes", {}).get("scenes", []):
+            title = (
+                scene.get("title")
+                or ((scene.get("files") or [{}])[0].get("basename"))
+                or f"Scene {scene['id']}"
+            )
+            out[int(scene["id"])] = title
+        return out
+    except Exception as e:
+        logger.error(f"Error fetching scene titles: {e}")
+        return {}
+
+def _scene_display_title(scene: dict) -> str:
+    return (
+        scene.get("title")
+        or ((scene.get("files") or [{}])[0].get("basename"))
+        or f"Scene {scene['id']}"
+    )
+
+
+async def search_scene_titles(query_text: str, limit: int = 20) -> list[dict]:
+    q = (query_text or "").strip()
+    if not q:
+        return []
+
+    ql = q.lower()
+
+    async def _run_query(payload: dict) -> list[dict]:
+        try:
+            response = await http_client.post(GRAPHQL_URL, json=payload, headers=_graphql_headers())
+            response.raise_for_status()
+            data = response.json()
+
+            if data.get("errors"):
+                logger.warning(f"GraphQL error searching scene titles for {q!r}: {data['errors']}")
+                return []
+
+            return data.get("data", {}).get("findScenes", {}).get("scenes", []) or []
+
+        except Exception as e:
+            logger.error(f"Error searching scene titles for {q!r}: {e}")
+            return []
+
+    text_query = {
+        "operationName": "FindScenes",
+        "variables": {
+            "filter": {
+                "q": q,
+                "page": 1,
+                "per_page": 100,
+                "sort": "created_at",
+                "direction": "DESC",
+            },
+            "scene_filter": {},
+        },
+        "query": """
+            query FindScenes($filter: FindFilterType, $scene_filter: SceneFilterType) {
+                findScenes(filter: $filter, scene_filter: $scene_filter) {
+                    scenes {
+                        id
+                        title
+                        files { basename }
+                    }
+                }
+            }
+        """,
+    }
+
+    path_query = {
+        "operationName": "FindScenes",
+        "variables": {
+            "filter": {
+                "page": 1,
+                "per_page": 100,
+                "sort": "created_at",
+                "direction": "DESC",
+            },
+            "scene_filter": {
+                "path": {
+                    "value": q,
+                    "modifier": "INCLUDES",
+                }
+            },
+        },
+        "query": """
+            query FindScenes($filter: FindFilterType, $scene_filter: SceneFilterType) {
+                findScenes(filter: $filter, scene_filter: $scene_filter) {
+                    scenes {
+                        id
+                        title
+                        files { basename }
+                    }
+                }
+            }
+        """,
+    }
+
+    text_scenes, path_scenes = await asyncio.gather(
+        _run_query(text_query),
+        _run_query(path_query),
+    )
+
+    merged: dict[int, dict] = {}
+    for scene in text_scenes + path_scenes:
+        try:
+            merged[int(scene["id"])] = scene
+        except Exception:
+            continue
+
+    exact_id = []
+    exact_text = []
+    prefix = []
+    contains = []
+
+    for scene in merged.values():
+        sid = int(scene["id"])
+        title = (scene.get("title") or "").strip()
+        basename = (((scene.get("files") or [{}])[0].get("basename")) or "").strip()
+        display_title = title or basename or f"Scene {sid}"
+
+        title_l = title.lower()
+        basename_l = basename.lower()
+        display_l = display_title.lower()
+
+        item = {"id": sid, "title": display_title}
+
+        if q.isdigit() and sid == int(q):
+            exact_id.append(item)
+        elif title_l == ql or basename_l == ql or display_l == ql:
+            exact_text.append(item)
+        elif title_l.startswith(ql) or basename_l.startswith(ql) or display_l.startswith(ql):
+            prefix.append(item)
+        elif ql in title_l or ql in basename_l or ql in display_l:
+            contains.append(item)
+
+    exact_id.sort(key=lambda x: x["title"].lower())
+    exact_text.sort(key=lambda x: x["title"].lower())
+    prefix.sort(key=lambda x: x["title"].lower())
+    contains.sort(key=lambda x: x["title"].lower())
+
+    return (exact_id + exact_text + prefix + contains)[:limit]
