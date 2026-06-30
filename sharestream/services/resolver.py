@@ -14,7 +14,8 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from sharestream.db.models import SharedTag, SharedVideo
+from sharestream.db.models import SharedTag
+from sharestream.config import DEFAULT_RESOLUTION
 
 KIND_INDIVIDUAL = "individual"
 KIND_TAG_VIDEO = "tag_video"
@@ -39,12 +40,7 @@ class ResolvedMedia:
     tag_share_id: Optional[str] = None
     stash_tag_id: Optional[str] = None
     title: Optional[str] = None
-    # Whether the tag share is featured on the home gallery. Only meaningful for
-    # tag videos; it (together with password_hash) decides whether the share's
-    # media stays limited to limit_to_tag. Always False for individual shares.
     show_in_gallery: bool = False
-    # For a non-public tag share, whether its operator opted to apply limit_to_tag.
-    # Always True for individual shares (no effect there).
     apply_limit_tag: bool = True
 
     @property
@@ -77,20 +73,10 @@ def resolve_media(db: Session, share_id: str) -> Optional[ResolvedMedia]:
     Individual shares win first (an individual share id never starts with the
     reserved ``tag-...-video-...`` shape), then composite tag-video ids.
     """
-    video = db.query(SharedVideo).filter(SharedVideo.share_id == share_id).first()
-    if video:
-        return ResolvedMedia(
-            kind=KIND_INDIVIDUAL,
-            share_id=share_id,
-            cookie_share_id=share_id,
-            stash_video_id=video.stash_video_id,
-            resolution=video.resolution,
-            expires_at=video.expires_at,
-            password_hash=video.password_hash,
-            embed_mode=video.embed_mode,
-            title=video.video_name,
-        )
-
+    # Note: Individual legacy shares (SharedVideo) have been removed. 
+    # Individual media is now resolved via VideoOverride in the access layer 
+    # (authorize_scene_media) using the scene ID directly. This resolver is 
+    # primarily used for legacy tag-video media redirects.
     parsed = parse_composite_tag_video(share_id)
     if parsed:
         tag_share_id, video_id = parsed

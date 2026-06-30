@@ -16,15 +16,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const stashIdInput = document.getElementById('stash-id');
     const videoNameInput = document.getElementById('video-name');
     const daysValidInput = document.getElementById('days-valid');
-    const resolutionInput = document.getElementById('resolution');
     const sharePasswordInput = document.getElementById('share-password');
-    const showInGalleryInput = document.getElementById('show-in-gallery');
     const lookupTitleButton = document.getElementById('lookup-title-button');
     const shareMessage = document.getElementById('share-message');
     const shareError = document.getElementById('share-error');
     const videoShareIdTypeSelect = document.getElementById('share-id-type-video');
     const videoCustomShareIdInput = document.getElementById('custom-share-id-video');
-    const videoEmbedModeSelect = document.getElementById('embed-mode-video');
     const tagEmbedModeSelect = document.getElementById('embed-mode-tag');
 
     const shareTagForm = document.getElementById('share-tag-form');
@@ -406,16 +403,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 video_name: videoNameInput.value,
                 stash_video_id: parseInt(stashIdInput.value, 10),
                 days_valid: parseInt(daysValidInput.value, 10),
-                resolution: resolutionInput.value,
                 password: sharePasswordInput.value || null,
-                show_in_gallery: showInGalleryInput.checked,
-                custom_share_id: videoCustomShareId,
-                embed_mode: (videoEmbedModeSelect && videoEmbedModeSelect.value) || null
+                custom_share_id: videoCustomShareId
             };
 
             logDebug('Sharing video with data:', shareData);
 
-            if (!shareData.video_name || isNaN(shareData.stash_video_id) || isNaN(shareData.days_valid) || !shareData.resolution) {
+            if (!shareData.video_name || isNaN(shareData.stash_video_id) || isNaN(shareData.days_valid)) {
                 shareError.textContent = 'Please fill in all required fields correctly.';
                 return;
             }
@@ -607,12 +601,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     <button class="copy-button" data-url="${escapeHTML(copyUrl)}">Copy</button>
                     <button class="edit-button" 
                         data-share-id="${escapeHTML(video.share_id)}" 
-                        data-video-name="${escapeHTML(video.video_name.split(' (')[0])}" 
+                        data-video-name="${escapeHTML(video.video_name)}" 
                         data-days-valid="${calculateDaysRemaining(video.expires_at)}" 
-                        data-resolution="${escapeHTML(video.resolution)}" 
                         data-has-password="${video.has_password}" 
-                        data-show-in-gallery="${video.show_in_gallery}"
-                        data-embed-mode="${escapeHTML(video.embed_mode || '')}"
                         data-stash-video-id="${escapeHTML(video.stash_video_id.toString())}">Edit</button>
                     <button class="delete-button" data-share-id="${escapeHTML(video.share_id)}">Delete</button>
                 </td>
@@ -729,18 +720,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const shareId = e.target.getAttribute('data-share-id');
                 const videoName = e.target.getAttribute('data-video-name');
                 const daysValid = e.target.getAttribute('data-days-valid');
-                const resolution = e.target.getAttribute('data-resolution');
-                const showInGallery = e.target.getAttribute('data-show-in-gallery') === 'true';
-                
-                const embedMode = e.target.getAttribute('data-embed-mode') || '';
 
                 if(editShareIdInput) editShareIdInput.value = shareId;
                 if(editVideoNameInput) editVideoNameInput.value = videoName;
                 if(editDaysValidInput) editDaysValidInput.value = Math.max(1, parseInt(daysValid) || 7);
-                if(editResolutionInput) editResolutionInput.value = resolution;
                 if(editSharePasswordInput) editSharePasswordInput.value = '';
-                if(editShowInGalleryInput) editShowInGalleryInput.checked = showInGallery;
-                if(editEmbedModeSelect) editEmbedModeSelect.value = embedMode;
                 if(editClearPasswordInput) editClearPasswordInput.checked = false;
                 
                 if(editModal) editModal.style.display = 'block';
@@ -826,15 +810,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 video_name: editVideoNameInput.value,
                 stash_video_id: stashVideoId, 
                 days_valid: parseInt(editDaysValidInput.value, 10),
-                resolution: editResolutionInput.value,
                 password: editSharePasswordInput.value || null,
-                show_in_gallery: editShowInGalleryInput.checked,
-                embed_mode: (editEmbedModeSelect && editEmbedModeSelect.value) || null,
                 clear_password: editClearPasswordInput ? editClearPasswordInput.checked : false
             };
 
-            if (!updatedData.video_name || isNaN(updatedData.days_valid) || !updatedData.resolution) {
-                editError.textContent = 'Please fill in all required fields correctly.';
+            if (isNaN(updatedData.days_valid)) {
+                editError.textContent = 'Please enter a valid number of days.';
                 return;
             }
 

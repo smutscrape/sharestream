@@ -48,7 +48,7 @@ from sharestream.config import (
     FILEDROP_STASH_SCAN_PATH,
     LIMIT_TO_TAG,
 )
-from sharestream.db.models import SharedTag, SharedVideo
+from sharestream.db.models import SharedTag
 from sharestream.services.access import tag_share_respects_limit_tag
 
 logger = logging.getLogger(__name__)
@@ -185,6 +185,7 @@ def find_public_view_share(db: Session, assigned_tag_ids) -> SharedTag | None:
     limit_to_tag is itself among the assigned tags. The caller builds the view
     URL as ``/{share.share_id}/{scene_id}``.
     """
+    from sharestream.db.models import VideoOverride
     assigned = {str(t) for t in assigned_tag_ids if t not in (None, "")}
     if not assigned:
         return None
@@ -220,6 +221,7 @@ async def get_public_tag_vocabulary(db: Session) -> list[dict]:
     These are exactly the tags an uploader is allowed to self-assign: the picker
     offers them and the completion endpoint validates submissions against them.
     """
+    from sharestream.db.models import VideoOverride
 
     global _vocab_cache
     now = time.time()
@@ -229,7 +231,7 @@ async def get_public_tag_vocabulary(db: Session) -> list[dict]:
 
     # No-password shares define the public surface.
     tag_shares = db.query(SharedTag).filter(SharedTag.password_hash == None).all()  # noqa: E711
-    individual = db.query(SharedVideo).filter(SharedVideo.password_hash == None).all()  # noqa: E711
+    individual = db.query(VideoOverride).filter(VideoOverride.password_hash == None).all()  # noqa: E711
 
     names: dict[str, str] = {}
     counts: dict[str, int] = {}

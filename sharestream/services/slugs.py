@@ -16,7 +16,7 @@ from fastapi import HTTPException
 from sqids import Sqids
 
 from sharestream.config import PAGES_DIR, SHARE_ID_LENGTH, SLUG_ALPHABET, SLUG_MIN_LENGTH
-from sharestream.db.models import SharedTag, SharedVideo, VideoOverride
+from sharestream.db.models import SharedTag, VideoOverride
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +153,6 @@ def validate_custom_share_id(slug: str, db) -> str:
         raise HTTPException(status_code=400, detail=f"'{canonical}' is a reserved word and can't be used as a share ID.")
     if markdown_page_slug_taken(canonical):
         raise HTTPException(status_code=400, detail=f"'{canonical}' is already used by a site page.")
-    if db.query(SharedVideo).filter(SharedVideo.share_id == canonical).first() or \
-       db.query(SharedTag).filter(SharedTag.share_id == canonical).first():
+    if db.query(SharedTag).filter(SharedTag.share_id == canonical).first():
         raise HTTPException(status_code=400, detail=f"Share ID '{canonical}' already exists.")
     return canonical

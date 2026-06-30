@@ -156,16 +156,8 @@ def _backfill_video_overrides_from_shared_videos() -> None:
             created, skipped_scene, skipped_slug,
         )
 
-
-# def run_migrations() -> None:
-#     _stamp_legacy_db_if_needed()
-#     command.upgrade(_alembic_config(), "head")
-#     logger.info("Database at revision %s", _current_revision())
-#     _seed_tag_sort_order()
-
 def run_migrations() -> None:
     _stamp_legacy_db_if_needed()
     command.upgrade(_alembic_config(), "head")
     logger.info("Database at revision %s", _current_revision())
     _seed_tag_sort_order()
-    _backfill_video_overrides_from_shared_videos()

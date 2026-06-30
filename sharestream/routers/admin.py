@@ -10,9 +10,9 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from sharestream.backends.stash import fetch_scene_title
-from sharestream.config import BASE_DOMAIN, GALLERY_MASONRY_DEFAULT
+from sharestream.config import BASE_DOMAIN, DEFAULT_RESOLUTION, GALLERY_MASONRY_DEFAULT
 from sharestream.core.security import get_current_user
-from sharestream.db.models import SharedTag, SharedVideo
+from sharestream.db.models import SharedTag, SceneViews, VideoOverride
 from sharestream.db.session import get_db
 from sharestream.schemas.shares import ReorderTagsRequest
 from sharestream.services.cache import clear_tag_membership_cache
@@ -50,23 +50,34 @@ async def get_video_title(stash_id: int, current_user: str = Depends(get_current
 @router.get("/shared_videos")
 async def shared_videos(current_user: str = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
-        videos = db.query(SharedVideo).all()
-        logger.info(f"Retrieved {len(videos)} shared videos")
+        # Query VideoOverride and join with SceneViews for the unified hit counter.
+        # VideoOverride does not store resolution, show_in_gallery, or embed_mode,
+        # so we default them to keep the admin UI functional.
+        overrides = db.query(VideoOverride).all()
+        logger.info(f"Retrieved {len(overrides)} shared videos (overrides)")
+        
+        # Batch fetch hit counts
+        scene_ids = [o.stash_video_id for o in overrides]
+        hits_map = {
+            row.stash_video_id: row.views 
+            for row in db.query(SceneViews).filter(SceneViews.stash_video_id.in_(scene_ids)).all()
+        }
+
         result = []
-        for v in videos:
-            share_url = f"{BASE_DOMAIN}/{v.share_id}"
+        for o in overrides:
+            share_url = f"{BASE_DOMAIN}/{o.vanity_slug}" if o.vanity_slug else f"{BASE_DOMAIN}/v/{o.stash_video_id}"
             result.append(
                 {
-                    "share_id": v.share_id,
-                    "video_name": f"{v.video_name} ({v.resolution})",
-                    "stash_video_id": v.stash_video_id,
-                    "expires_at": v.expires_at,
-                    "hits": v.hits,
+                    "share_id": o.vanity_slug or str(o.stash_video_id),
+                    "video_name": f"Scene {o.stash_video_id} ({DEFAULT_RESOLUTION})", # Name not stored in override
+                    "stash_video_id": o.stash_video_id,
+                    "expires_at": o.expires_at,
+                    "hits": hits_map.get(o.stash_video_id, 0),
                     "share_url": share_url,
-                    "resolution": v.resolution,
-                    "has_password": v.password_hash is not None,
-                    "show_in_gallery": v.show_in_gallery,
-                    "embed_mode": v.embed_mode,
+                    "resolution": DEFAULT_RESOLUTION, # Defaulted
+                    "has_password": o.password_hash is not None,
+                    "show_in_gallery": False, # Defaulted
+                    "embed_mode": None, # Defaulted
                 }
             )
         return result

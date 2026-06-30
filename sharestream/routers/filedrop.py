@@ -252,7 +252,7 @@ def _mint_filedrop_override_slug(db: Session, length: int = 10) -> str:
     VideoOverride-backed /{slug} URL instead of a legacy SharedVideo short URL
     that 301s to /v/{sqid} and drops the password flow.
     """
-    from sharestream.db.models import SharedTag, SharedVideo, VideoOverride
+    from sharestream.db.models import SharedTag, VideoOverride
     from sharestream.services.slugs import RESERVED_SLUGS, markdown_page_slug_taken
 
     alphabet = "abcdefghijkmnpqrstuvwxyz23456789"
@@ -263,8 +263,6 @@ def _mint_filedrop_override_slug(db: Session, length: int = 10) -> str:
         if db.query(VideoOverride).filter(VideoOverride.vanity_slug == slug).first():
             continue
         if db.query(SharedTag).filter(SharedTag.share_id == slug).first():
-            continue
-        if db.query(SharedVideo).filter(SharedVideo.share_id == slug).first():
             continue
         return slug
     raise HTTPException(status_code=500, detail="Failed to generate a unique share slug")
@@ -362,8 +360,7 @@ async def filedrop_details(request: Request, scene_id: int = Form(...),
         return JSONResponse(result)
 
     # 2. Otherwise optionally mint a password-protected per-upload share link.
-    # Use the modern VideoOverride-backed individual share path, not legacy
-    # SharedVideo rows (which short_urls now 301 to /v/{sqid} and lose the
+    # Use the modern VideoOverride-backed individual share path and lose the
     # password flow).
     if FILEDROP_AUTO_SHARE:
         share_url, password = _create_filedrop_override_share(db, scene_id)

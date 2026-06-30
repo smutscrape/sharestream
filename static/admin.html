@@ -67,12 +67,6 @@
                                 <input type="text" id="video-name" required>
                                 <label for="days-valid">Days Valid</label>
                                 <input type="number" id="days-valid" value="7" required>
-                                <label for="resolution">Resolution</label>
-                                <select id="resolution" required>
-                                    <option value="LOW">Low</option>
-                                    <option value="MEDIUM" selected>Medium</option>
-                                    <option value="HIGH">High</option>
-                                </select>
                                 <label for="share-id-type-video">Share ID Type</label>
                                 <select id="share-id-type-video" required>
                                     <option value="random" selected>Random</option>
@@ -80,22 +74,8 @@
                                 </select>
                                 <label for="custom-share-id-video" style="display: none;">Custom Share ID</label>
                                 <input type="text" id="custom-share-id-video" placeholder="e.g. clip" style="display: none;">
-                                <label for="embed-mode-video">Social Embed</label>
-                                <select id="embed-mode-video">
-                                    <option value="" selected>Use default</option>
-                                    <option value="preview">Preview clip</option>
-                                    <option value="full">Full video</option>
-                                    <option value="dynamic">Dynamic</option>
-                                </select>
                                 <label for="share-password">Password (optional)</label>
                                 <input type="password" id="share-password" placeholder="Password">
-                                <div style="grid-column: 1 / -1; margin-top: 5px;">
-                                    <label class="checkbox-wrapper">
-                                        <input type="checkbox" id="show-in-gallery">
-                                        <span class="toggle-switch"></span>
-                                        <span class="checkbox-label">Feature on Home?</span>
-                                    </label>
-                                </div>
                                 <button type="submit" style="grid-column: 1 / -1;">Share Video</button>
                             </form>
                             <p id="share-message" class="success-message"></p>
@@ -218,30 +198,12 @@
             <form class="grid-form">
                 <input type="hidden" id="edit-share-id">
                 <label for="edit-video-name">Video Name</label>
-                <input type="text" id="edit-video-name" required>
+                <input type="text" id="edit-video-name" readonly style="opacity: 0.6;">
                 <label for="edit-days-valid">Days Valid</label>
                 <input type="number" id="edit-days-valid" required>
-                <label for="edit-resolution">Resolution</label>
-                <select id="edit-resolution" required>
-                    <option value="LOW">Low</option>
-                    <option value="MEDIUM">Medium</option>
-                    <option value="HIGH">High</option>
-                </select>
-                <label for="edit-embed-mode">Social Embed</label>
-                <select id="edit-embed-mode">
-                    <option value="">Use default</option>
-                    <option value="preview">Preview clip</option>
-                    <option value="full">Full video</option>
-                    <option value="dynamic">Dynamic</option>
-                </select>
                 <label for="edit-share-password">Password (leave blank to keep)</label>
                 <input type="password" id="edit-share-password" placeholder="Password">
                 <div style="grid-column: 1 / -1; margin-top: 5px;">
-                    <label class="checkbox-wrapper">
-                        <input type="checkbox" id="edit-show-in-gallery">
-                        <span class="toggle-switch"></span>
-                        <span class="checkbox-label">Feature on Home?</span>
-                    </label>
                     <label class="checkbox-wrapper" style="margin-left: 16px;">
                         <input type="checkbox" id="edit-clear-password">
                         <span class="toggle-switch"></span>
@@ -255,6 +217,7 @@
             </form>
             <p id="edit-error" class="error-message"></p>
         </div>
+
 
         <!-- Edit Tag Modal (Hidden by default) -->
         <div id="edit-tag-modal" style="display: none;">

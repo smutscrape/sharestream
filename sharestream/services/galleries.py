@@ -31,7 +31,7 @@ from sharestream.config import (
     VISIBILITY_PUBLIC,
 )
 from sharestream.core.branding import site_context
-from sharestream.db.models import SharedTag, SharedVideo
+from sharestream.db.models import SharedTag
 from sharestream.routers.pages import get_home_page_context
 from sharestream.services.access import tag_share_respects_limit_tag
 from sharestream.services.cache import prime_tag_membership

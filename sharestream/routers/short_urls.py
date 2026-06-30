@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from sharestream.core.security import pwd_context
 from sharestream.core.templates import render
-from sharestream.db.models import SharedTag, SharedVideo, VideoOverride
+from sharestream.db.models import SharedTag, VideoOverride
 from sharestream.db.session import get_db
 from sharestream.routers.pages import render_markdown_page
 from sharestream.routers.tags import tag_share_page
@@ -140,9 +140,7 @@ async def short_share(slug: str, request: Request = None, db: Session = Depends(
          (renders the player directly at /{slug}; password_hash governs).
       2. ``SharedTag.share_id``                -> curated tag-share gallery.
       3. Markdown page at data/pages/{slug}.md.
-      4. Legacy ``SharedVideo.share_id`` share -> 301 to /v/{canonical} (carries
-         the unlock cookie so a viewer who clicked an old link stays unlocked).
-      5. Else 404.
+      4. Else 404.
     """
     # 1. Individual share via VideoOverride (the canonical home for any share
     # created with a custom slug and/or password).
@@ -167,16 +165,7 @@ async def short_share(slug: str, request: Request = None, db: Session = Depends(
     if page is not None:
         return page
 
-    # 4. Legacy plain share (SharedVideo row, no custom slug/password) -> 301
-    #    to the canonical stateless /v/{slug}.
-    video = db.query(SharedVideo).filter_by(share_id=slug).first()
-    if video is not None:
-        canonical = canonical_video_slug(db, video.stash_video_id)
-        resp = RedirectResponse(url=f"/v/{canonical}", status_code=301)
-        access.carry_unlock_cookie(request, resp, slug, video.stash_video_id)
-        return resp
-
-    # 5. Unknown -> 404.
+    # 4. Unknown -> 404.
     raise HTTPException(status_code=404, detail="Not found")
 
 

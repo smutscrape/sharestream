@@ -10,13 +10,13 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from sharestream.config import BASE_DOMAIN, SHARES_DIR
+from sharestream.config import BASE_DOMAIN, DEFAULT_RESOLUTION, SHARES_DIR
 from sharestream.core.branding import site_context
 from sharestream.core.security import get_current_user, pwd_context
 from sharestream.core.templates import render
-from sharestream.db.models import SharedTag, SharedVideo, VideoOverride
+from sharestream.db.models import SharedTag, VideoOverride
 from sharestream.db.session import get_db
-from sharestream.services.slugs import RESERVED_SLUGS, canonical_video_slug
+from sharestream.services.slugs import RESERVED_SLUGS, canonical_video_slug, decode_video_id
 from sharestream.schemas.shares import ShareVideoRequest
 from sharestream.services import access
 from sharestream.services.embed_policy import normalize_embed_mode
@@ -36,20 +36,16 @@ async def share_video(request: ShareVideoRequest,
 
     - Custom slug OR password → creates a ``VideoOverride``; returns the
       individual-share URL ``/{slug}`` (the slug is the capability).
-    - Neither → returns the stateless ``/v/{sqid}`` URL; no DB row is created
-      for the share (no VideoOverride, no SharedVideo).
+    - Neither → returns the stateless ``/v/{sqid}`` URL; no DB row is created.
     """
     expires_at = datetime.datetime.now(timezone.utc) + datetime.timedelta(days=request.days_valid)
     try:
         has_capability = bool(request.custom_share_id) or bool(request.password)
 
         if has_capability:
-            # Validate / generate the custom slug.
             if request.custom_share_id:
                 vanity_slug = validate_custom_share_id(request.custom_share_id, db)
             else:
-                # No custom slug but a password was set: mint a random, unguessable
-                # slug so the share has a concrete /{slug} URL to send the viewer to.
                 vanity_slug = _mint_unique_slug(db)
 
             password_hash = pwd_context.hash(request.password) if request.password else None
@@ -57,7 +53,6 @@ async def share_video(request: ShareVideoRequest,
             override = db.query(VideoOverride).filter(
                 VideoOverride.stash_video_id == request.stash_video_id).first()
             if override is not None:
-                # Update the existing override in place.
                 override.vanity_slug = vanity_slug
                 override.password_hash = password_hash
                 override.expires_at = expires_at
@@ -79,14 +74,12 @@ async def share_video(request: ShareVideoRequest,
                 share_url += f"?pwd={request.password}"
             return {"share_url": share_url}
 
-        # No capability: just return the global /v/{sqid} stateless URL.
         from sharestream.services.slugs import encode_video_id
         sqid = encode_video_id(request.stash_video_id)
         logger.info(f"Video share (stateless): stash_video_id={request.stash_video_id}, "
                     f"resolution={request.resolution}")
         return {"share_url": f"{BASE_DOMAIN}/v/{sqid}"}
     except HTTPException:
-        # Surface validation errors (e.g. reserved/duplicate custom slug) as-is.
         raise
     except Exception as e:
         logger.error(f"Error sharing video: {e}")
@@ -101,10 +94,8 @@ def _mint_unique_slug(db: Session, length: int = 10) -> str:
         slug = "u" + "".join(secrets.choice(alphabet) for _ in range(length - 1))
         if slug in RESERVED_SLUGS:
             continue
-        from sharestream.db.models import SharedTag
         if db.query(VideoOverride).filter(VideoOverride.vanity_slug == slug).first() or \
-           db.query(SharedTag).filter(SharedTag.share_id == slug).first() or \
-           db.query(SharedVideo).filter(SharedVideo.share_id == slug).first():
+           db.query(SharedTag).filter(SharedTag.share_id == slug).first():
             continue
         return slug
     raise HTTPException(status_code=500, detail="Failed to generate a unique share slug")
@@ -115,27 +106,19 @@ async def edit_share(share_id: str, request: ShareVideoRequest,
                      current_user: str = Depends(get_current_user),
                      db: Session = Depends(get_db)):
     try:
-        video = db.query(SharedVideo).filter(SharedVideo.share_id == share_id).first()
-        if not video:
+        # Admin UI passes the vanity_slug as the share_id for VideoOverrides
+        override = db.query(VideoOverride).filter(VideoOverride.vanity_slug == share_id).first()
+        if not override:
             raise HTTPException(status_code=404, detail="Share link not found")
-        video.video_name = request.video_name
-        video.expires_at = datetime.datetime.now(timezone.utc) + datetime.timedelta(days=request.days_valid)
-        video.resolution = request.resolution
-        # Password: explicit clear wins; a new value sets it; blank keeps existing.
+            
+        # VideoOverride only tracks slug, password, and expiry.
+        override.expires_at = datetime.datetime.now(timezone.utc) + datetime.timedelta(days=request.days_valid)
         if request.clear_password:
-            video.password_hash = None
+            override.password_hash = None
         elif request.password:
-            video.password_hash = pwd_context.hash(request.password)
-        video.show_in_gallery = request.show_in_gallery if hasattr(request, 'show_in_gallery') else False
-        # Only touch embed_mode if the client actually sent it, so editing via
-        # the (embed-less) modal doesn't silently wipe an existing override.
-        if 'embed_mode' in request.model_fields_set:
-            video.embed_mode = normalize_embed_mode(request.embed_mode)
+            override.password_hash = pwd_context.hash(request.password)
+        
         db.commit()
-
-        # Regenerate .m3u8 file
-        if not await generate_m3u8_file(share_id, request.stash_video_id, request.resolution):
-            raise HTTPException(status_code=500, detail="Failed to regenerate .m3u8 file")
 
         logger.info(f"Share updated: share_id={share_id}")
         return {"message": "Share updated"}
@@ -151,17 +134,12 @@ async def delete_share(share_id: str,
                        current_user: str = Depends(get_current_user),
                        db: Session = Depends(get_db)):
     try:
-        video = db.query(SharedVideo).filter(SharedVideo.share_id == share_id).first()
-        if not video:
+        override = db.query(VideoOverride).filter(VideoOverride.vanity_slug == share_id).first()
+        if not override:
             raise HTTPException(status_code=404, detail="Share link not found")
-        db.delete(video)
+            
+        db.delete(override)
         db.commit()
-
-        # Delete .m3u8 file
-        m3u8_path = SHARES_DIR / f"{share_id}.m3u8"
-        if m3u8_path.exists():
-            m3u8_path.unlink()
-            logger.info(f"Deleted .m3u8 file for share_id={share_id}")
 
         logger.info(f"Share deleted: share_id={share_id}")
         return {"message": "Share deleted"}
@@ -176,12 +154,13 @@ async def delete_share(share_id: str,
 async def share_page(share_id: str, request: Request = None, db: Session = Depends(get_db)):
     """Legacy individual-share URL → 301 to the canonical /v/{slug}, carrying the
     unlock cookie so a viewer who unlocked the old link stays unlocked."""
-    video = db.query(SharedVideo).filter_by(share_id=share_id).first()
-    if not video:
+    override = db.query(VideoOverride).filter(VideoOverride.vanity_slug == share_id).first()
+    if not override:
         raise HTTPException(status_code=404, detail="Share link not found")
-    slug = canonical_video_slug(db, video.stash_video_id)
+        
+    slug = canonical_video_slug(db, override.stash_video_id)
     resp = RedirectResponse(url=f"/v/{slug}", status_code=301)
-    access.carry_unlock_cookie(request, resp, share_id, video.stash_video_id)
+    access.carry_unlock_cookie(request, resp, share_id, override.stash_video_id)
     return resp
 
 
@@ -194,23 +173,44 @@ async def verify_password(share_id: str, password: str = Form(...),
     page the viewer originally asked for (validated same-origin ``next``), or
     the canonical short URL as a fallback."""
     safe_next = access.safe_next_path(next_url)
-    vid = db.query(SharedVideo).filter_by(share_id=share_id).first()
-    tag = None if vid else db.query(SharedTag).filter_by(share_id=share_id).first()
-    target = vid or tag
-    display_name = vid.video_name if vid else (f"Tag: {tag.tag_name}" if tag else "")
-    if not target or not target.password_hash \
-       or not pwd_context.verify(password, target.password_hash):
+    
+    # Try VideoOverride by vanity_slug
+    override = db.query(VideoOverride).filter(VideoOverride.vanity_slug == share_id).first()
+    if override:
+        if not override.password_hash:
+            resp = RedirectResponse(safe_next or f"/{share_id}", status_code=303)
+            access.set_unlock_cookie(resp, str(override.stash_video_id))
+            return resp
+        if pwd_context.verify(password, override.password_hash):
+            resp = RedirectResponse(safe_next or f"/{share_id}", status_code=303)
+            access.set_unlock_cookie(resp, str(override.stash_video_id))
+            return resp
+        html = render(
+            "password-prompt.html",
+            **site_context(),
+            video_name="Video",
+            share_id=share_id,
+            error_message="Incorrect password. Please try again.",
+            next_url=safe_next or "",
+        )
+        return HTMLResponse(html, status_code=401)
+
+
+    # Fallback to SharedTag
+    tag = db.query(SharedTag).filter_by(share_id=share_id).first()
+    display_name = f"Tag: {tag.tag_name}" if tag else ""
+    if not tag or not tag.password_hash \
+       or not pwd_context.verify(password, tag.password_hash):
         html = render(
             "password-prompt.html",
             **site_context(),
             video_name=display_name,
             share_id=share_id,
             error_message="Incorrect password. Please try again.",
-            # Preserve the intended destination across a failed attempt.
             next_url=safe_next or "",
         )
         return HTMLResponse(html, status_code=401)
-    # success → set a signed cookie and 303 back to the requested page
+        
     resp = RedirectResponse(safe_next or f"/{share_id}", status_code=303)
     access.set_unlock_cookie(resp, share_id)
     return resp

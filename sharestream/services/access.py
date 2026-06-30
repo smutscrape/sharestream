@@ -28,7 +28,7 @@ from sharestream.config import (
 from sharestream.core.security import pwd_context
 from sharestream.core.templates import render
 from sharestream.core.branding import site_context
-from sharestream.db.models import SharedTag, SharedVideo, VideoOverride
+from sharestream.db.models import SharedTag, VideoOverride
 from sharestream.db.session import SessionLocal
 from sharestream.services.cache import get_scene_tag_ids, is_video_in_tag
 
@@ -323,10 +323,6 @@ def authorize_tag_share(request: Request, db: Session, share_id: str,
     """Gate a media sub-request for a tag SHARE as a whole (its collection-thumb),
     enforcing expiry + password keyed to the tag share id.
 
-    Parallels :func:`authorize_share_media` but for the collection (no single
-    video / membership check). A password-protected tag share therefore won't
-    expose a collection preview to an anonymous crawler — the same privacy stance
-    as the embed player.
     """
     tag_share = db.query(SharedTag).filter(SharedTag.share_id == share_id).first()
     if not tag_share:
@@ -335,22 +331,6 @@ def authorize_tag_share(request: Request, db: Session, share_id: str,
     if not media_access_ok(request, share_id, tag_share.password_hash):
         raise HTTPException(status_code=403, detail="Password required")
     return tag_share
-
-
-def authorize_share_media(request: Request, db: Session, share_id: str,
-                          expired_detail: str) -> SharedVideo:
-    """Gate a media sub-request for an individual share (expiry + password).
-
-    Returns the SharedVideo. ``expired_detail`` lets callers preserve the exact
-    legacy wording ("Share has expired" for thumbnail/preview routes).
-    """
-    video = db.query(SharedVideo).filter(SharedVideo.share_id == share_id).first()
-    if not video:
-        raise HTTPException(status_code=404, detail="Share not found")
-    ensure_not_expired(video.expires_at, expired_detail)
-    if not media_access_ok(request, share_id, video.password_hash):
-        raise HTTPException(status_code=403, detail="Password required")
-    return video
 
 
 # ------------------------------------------------------------------
@@ -488,7 +468,7 @@ async def authorize_scene_media(request: Request, stash_video_id: int,
 
     # 4. Gallery-scoped unlock: the caller (gallery-scoped video route) supplies
     #    the exact share_id via ?via=. O(1) lookup — no scan of all tag shares.
-    if via_share_id: # HEADMASTER CHANGE 6/27 - REVISIT AFTER TESTING
+    if via_share_id:
         with SessionLocal() as db:
             tag_share = db.query(SharedTag).filter(SharedTag.share_id == via_share_id).first()
         if tag_share:
